@@ -1,4 +1,4 @@
-![logo](https://github.com/user-attachments/assets/b46d2ad4-ef72-4bdf-892d-5f17bfdf1ee4)**live @ [healthevidence.onrender.com](healthevidence.onrender.com)**
+**live @ [healthevidence.onrender.com](healthevidence.onrender.com)**
 
 # Health Evidence
 
