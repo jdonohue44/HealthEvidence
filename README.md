@@ -1,21 +1,19 @@
+![logo](https://github.com/user-attachments/assets/b46d2ad4-ef72-4bdf-892d-5f17bfdf1ee4)**live @ [healthevidence.onrender.com](healthevidence.onrender.com)**
+
 # Health Evidence
 
-What's proven and what's not.
-
-This project highlights health research you can actually trust, and calls out popular claims that aren't well supported.
+This project highlights health research you can trust, and calls out popular claims that aren't well supported by evidence.
 
 ## What This Project Does
 
 1. **Finds Strong Evidence**: Queries ClinicalTrials.gov for well-designed experiments with clear, reliable results.
-
 2. **Distinguishes Strong from Weak**: Clearly labels "Strong Evidence" from proper experiments versus "Weak Evidence" from studies that only observed patterns.
-
 3. **Explains It Simply**: Presents findings in plain language that anyone can understand, without scientific jargon.
 
 ## Project Structure
 
 ```
-Ultra-Significant-Trials/
+HealthEvidence/
 ├── pipeline/                    # Data collection and analysis
 │   ├── results_analysis.py      # Fetch and analyze trials from ClinicalTrials.gov
 │   ├── export_csv.py            # Export analyzed data to CSV
@@ -89,19 +87,14 @@ Claims labeled "Weak Evidence" typically come from:
 ### Strong Evidence Example
 
 > **Eating more fiber lowers blood pressure**
->
 > Researchers randomly assigned 1,240 adults with high blood pressure to either a high-fiber diet or their usual diet for 12 weeks. Those eating more fiber saw their blood pressure drop by about 8 points on average.
->
 > This is strong evidence because participants were randomly assigned to groups, and the large sample size provides reliable estimates.
 
 ### Weak Evidence Example
 
 > **Does tennis really add 10 years to your life?**
->
 > You may have seen headlines saying tennis players live nearly a decade longer. This comes from a study that followed 8,577 people in Copenhagen over 25 years.
->
 > Here's the problem: researchers didn't assign people to play tennis. They just watched who already played. The people who chose tennis were probably different in many ways—they may have had more money, better healthcare, or more friends.
->
 > The study authors themselves wrote that we can't know if tennis actually caused the longer lifespan.
 
 ## Data Sources
@@ -217,20 +210,3 @@ Higher scores indicate more reliable, impactful findings.
 | 0.2     | Small effect   |
 | 0.5     | Medium effect  |
 | 0.8+    | Large effect   |
-
-## Contributing
-
-This project welcomes contributions:
-
-1. **Curate weak evidence**: Help identify popular health claims with poor scientific backing
-2. **Improve summaries**: Make the plain-language explanations clearer
-3. **Expand data sources**: Help integrate WHO ICTRP and other trial registries
-4. **Design improvements**: Enhance accessibility and mobile experience
-
-## Disclaimer
-
-This project is for educational purposes only and does not constitute medical advice. Always consult qualified healthcare providers for personal health decisions.
-
-## License
-
-MIT License
