@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Health Evidence</title>
+    <meta name="description" content="Health research you can trust. We highlight what's proven and what's not in nutrition, exercise, and health.">
+    <link rel="icon" type="image/svg+xml" href="img/logo.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Newsreader:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header class="masthead">
+        <div class="masthead-content">
+            <h1 class="site-title">Health Evidence</h1>
+            <p class="site-tagline">What's proven and what's not</p>
+        </div>
+    </header>
+
+    <nav class="main-nav">
+        <div class="nav-content">
+            <div class="nav-row">
+                <ul class="nav-tabs" role="tablist">
+                    <li>
+                        <button class="nav-tab active" data-tab="latest" role="tab" aria-selected="true">
+                            Latest
+                        </button>
+                    </li>
+                    <li>
+                        <button class="nav-tab" data-tab="nutrition" role="tab" aria-selected="false">
+                            Nutrition
+                        </button>
+                    </li>
+                    <li>
+                        <button class="nav-tab" data-tab="exercise" role="tab" aria-selected="false">
+                            Exercise
+                        </button>
+                    </li>
+                    <li>
+                        <button class="nav-tab" data-tab="health" role="tab" aria-selected="false">
+                            Health
+                        </button>
+                    </li>
+                    <li>
+                        <button class="nav-tab nav-tab-weak" data-tab="weak" role="tab" aria-selected="false">
+                            Weak Evidence
+                        </button>
+                    </li>
+                </ul>
+                <div class="search-container">
+                    <input 
+                        type="search" 
+                        id="search-input" 
+                        class="search-input" 
+                        placeholder="Search topics (e.g., salt, alcohol, yoga)"
+                        aria-label="Search studies"
+                    >
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="main-content">
+        <div class="content-wrapper">
+            <!-- Loading state -->
+            <div id="loading" class="loading">
+                <p>Loading studies...</p>
+            </div>
+
+            <!-- Error state -->
+            <div id="error" class="error" style="display: none;">
+                <p>Unable to load studies. Please try again later.</p>
+            </div>
+
+            <!-- Studies list -->
+            <section id="studies-list" class="studies-list" aria-label="Research studies">
+                <!-- Studies will be rendered here by JavaScript -->
+            </section>
+
+            <!-- Empty state -->
+            <div id="empty-state" class="empty-state" style="display: none;">
+                <p id="empty-state-message">No studies found in this category.</p>
+            </div>
+        </div>
+    </main>
+
+    <footer class="site-footer">
+        <div class="footer-content">
+            <div class="footer-about">
+                <h2>About</h2>
+                <p>
+                    Health Evidence cuts through the noise. We highlight research that's 
+                    actually reliable, and call out popular claims that aren't.
+                </p>
+                <p>
+                    Our goal is simple: help you know what you can trust.
+                </p>
+            </div>
+            <div class="footer-methodology">
+                <h2>How We Decide</h2>
+                <p>
+                    <strong>Strong Evidence</strong> comes from well-designed experiments 
+                    where people were randomly assigned to groups, with clear results 
+                    and enough participants to be reliable.
+                </p>
+                <p>
+                    <strong>Weak Evidence</strong> often comes from studies that only 
+                    observed patterns without testing them, making it impossible to 
+                    know if one thing actually caused another.
+                </p>
+            </div>
+            <div class="footer-sources">
+                <h2>Data Sources</h2>
+                <p>
+                    Gold standard studies are sourced from 
+                    <a href="https://clinicaltrials.gov" target="_blank" rel="noopener">ClinicalTrials.gov</a>, 
+                    the U.S. registry of clinical trials.
+                </p>
+                <p>
+                    Weak evidence entries are manually curated based on peer-reviewed literature 
+                    and scientific commentary.
+                </p>
+            </div>
+        </div>
+        <div class="footer-bottom">
+            <p>Data refreshed from ClinicalTrials.gov. For educational purposes only. Not medical advice.</p>
+        </div>
+    </footer>
+
+    <!-- Study detail modal -->
+    <div id="study-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" style="display: none;">
+        <div class="modal-backdrop"></div>
+        <div class="modal-content">
+            <button class="modal-close" aria-label="Close">&times;</button>
+            <article class="modal-body">
+                <!-- Modal content will be rendered by JavaScript -->
+            </article>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
