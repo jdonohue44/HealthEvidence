@@ -20,6 +20,17 @@ const modalBackdropEl = modalEl.querySelector('.modal-backdrop');
 const modalCloseEl = modalEl.querySelector('.modal-close');
 const searchInputEl = document.getElementById('search-input');
 
+const META_ANALYSIS_PATTERN = /meta[-\s]?analysis|systematic review/i;
+const RANDOMIZED_PATTERN = /randomi[sz]ed|randomized controlled trial|rct/i;
+
+function detectMetaAnalysis(text) {
+    return META_ANALYSIS_PATTERN.test(text || '');
+}
+
+function detectRandomized(text) {
+    return RANDOMIZED_PATTERN.test(text || '');
+}
+
 /**
  * Initialize the application
  */
@@ -76,7 +87,12 @@ function loadCSV(path) {
 function processGoldStandardData(data) {
     return data
         .filter(row => row.nct_id && row.headline)
-        .map(row => ({
+        .map(row => {
+            const metaSource = `${row.title || ''} ${row.headline || ''} ${row.summary || ''}`;
+            const isMetaAnalysis = detectMetaAnalysis(metaSource);
+            const isRandomized = !isMetaAnalysis;
+
+            return ({
             id: row.nct_id,
             type: 'gold',
             category: (row.category || 'health').toLowerCase(),
@@ -102,8 +118,11 @@ function processGoldStandardData(data) {
             effectMagnitude: row.effect_magnitude || '',
             pValue: parseFloat(row.p_value) || null,
             ultraScore: parseFloat(row.ultra_score) || 0,
-            sourceUrl: `https://clinicaltrials.gov/study/${row.nct_id}`
-        }))
+                sourceUrl: `https://clinicaltrials.gov/study/${row.nct_id}`,
+                isRandomized,
+                isMetaAnalysis
+            });
+        })
         .sort((a, b) => b.ultraScore - a.ultraScore);
 }
 
@@ -113,7 +132,12 @@ function processGoldStandardData(data) {
 function processWeakEvidenceData(data) {
     return data
         .filter(row => row.claim || row.headline)
-        .map(row => ({
+        .map(row => {
+            const metaSource = `${row.study_type || ''} ${row.headline || ''} ${row.summary || ''}`;
+            const isMetaAnalysis = detectMetaAnalysis(metaSource);
+            const isRandomized = !isMetaAnalysis && detectRandomized(metaSource);
+
+            return ({
             id: row.study_id || `weak-${Math.random().toString(36).substr(2, 9)}`,
             type: 'weak',
             category: (row.category || 'health').toLowerCase(),
@@ -127,8 +151,11 @@ function processWeakEvidenceData(data) {
             whyWeak: row.why_weak || '',
             confounders: row.confounders || '',
             sourceUrl: row.source_url || '',
-            datePublished: row.date_published || ''
-        }));
+                datePublished: row.date_published || '',
+                isRandomized,
+                isMetaAnalysis
+            });
+        });
 }
 
 /**
@@ -361,6 +388,33 @@ function generateSimpleHeadline(study) {
 }
 
 /**
+ * Render method tags (RCT, meta-analysis)
+ */
+function renderMethodTags(study, classPrefix = 'study') {
+    const tags = [];
+
+    if (study.isRandomized) {
+        tags.push({
+            label: 'Randomized trial',
+            className: `${classPrefix}-method ${classPrefix}-method-rct`
+        });
+    }
+
+    if (study.isMetaAnalysis) {
+        tags.push({
+            label: 'Meta-analysis',
+            className: `${classPrefix}-method ${classPrefix}-method-meta`
+        });
+    }
+
+    if (tags.length === 0) {
+        return '';
+    }
+
+    return tags.map(tag => `<span class="${tag.className}">${tag.label}</span>`).join('');
+}
+
+/**
  * Render a gold standard study article
  */
 function renderGoldStudyArticle(study) {
@@ -377,16 +431,20 @@ function renderGoldStudyArticle(study) {
     
     const simpleHeadline = generateSimpleHeadline(study);
     const hasFullTitle = study.title && study.title !== simpleHeadline;
+    const methodTags = renderMethodTags(study);
     
     return `
         <article class="study-article" data-study-id="${escapeHtml(study.id)}" data-study-type="gold" tabindex="0" role="button">
             <header class="study-header">
                 <span class="study-category">${escapeHtml(study.category)}</span>
-                <span class="study-tier ${tierClass}">${tierLabel}</span>
+                <div class="study-badges">
+                    <span class="study-tier ${tierClass}">${tierLabel}</span>
+                    ${methodTags}
+                </div>
             </header>
-            <h2 class="study-headline">${escapeHtml(simpleHeadline)}</h2>
-            ${hasFullTitle ? `<p class="study-formal-title">${escapeHtml(study.title)}</p>` : ''}
-            <p class="study-summary">${escapeHtml(truncateSummary(study.summary))}</p>
+            <h2 class="study-headline">${highlightText(simpleHeadline, searchQuery)}</h2>
+            ${hasFullTitle ? `<p class="study-formal-title">${highlightText(study.title, searchQuery)}</p>` : ''}
+            <p class="study-summary">${highlightText(truncateSummary(study.summary), searchQuery)}</p>
             <footer class="study-meta">
                 ${meta.map(m => escapeHtml(m)).join('<span class="study-meta-divider">·</span>')}
             </footer>
@@ -398,14 +456,18 @@ function renderGoldStudyArticle(study) {
  * Render a weak evidence study article
  */
 function renderWeakStudyArticle(study) {
+    const methodTags = renderMethodTags(study);
     return `
         <article class="study-article study-article-weak" data-study-id="${escapeHtml(study.id)}" data-study-type="weak" tabindex="0" role="button">
             <header class="study-header">
                 <span class="study-category">${escapeHtml(study.category)}</span>
-                <span class="study-tier study-tier-weak">Weak Evidence</span>
+                <div class="study-badges">
+                    <span class="study-tier study-tier-weak">Weak Evidence</span>
+                    ${methodTags}
+                </div>
             </header>
-            <h2 class="study-headline">${escapeHtml(study.headline)}</h2>
-            <p class="study-summary">${escapeHtml(truncateSummary(study.summary))}</p>
+            <h2 class="study-headline">${highlightText(study.headline, searchQuery)}</h2>
+            <p class="study-summary">${highlightText(truncateSummary(study.summary), searchQuery)}</p>
             <footer class="study-meta">
                 ${study.studyType ? escapeHtml(study.studyType) : ''}
                 ${study.sampleSize > 0 ? `<span class="study-meta-divider">·</span>${study.sampleSize.toLocaleString()} people observed` : ''}
@@ -455,17 +517,21 @@ function renderGoldStudyModal(study) {
     const tierClass = study.evidenceTier === 'GOLD' ? 'study-tier-gold' : 'study-tier-silver';
     const tierLabel = 'Strong Evidence';
     const simpleHeadline = generateSimpleHeadline(study);
+    const methodTags = renderMethodTags(study, 'modal');
     
     return `
         <header class="modal-header">
             <p class="modal-category">${escapeHtml(study.category)}</p>
-            <h1 class="modal-title" id="modal-title">${escapeHtml(simpleHeadline)}</h1>
-            ${study.title && study.title !== simpleHeadline ? `<p class="modal-formal-title">${escapeHtml(study.title)}</p>` : ''}
-            <span class="modal-tier ${tierClass}">${tierLabel}</span>
+            <h1 class="modal-title" id="modal-title">${highlightText(simpleHeadline, searchQuery)}</h1>
+            ${study.title && study.title !== simpleHeadline ? `<p class="modal-formal-title">${highlightText(study.title, searchQuery)}</p>` : ''}
+            <div class="modal-badges">
+                <span class="modal-tier ${tierClass}">${tierLabel}</span>
+                ${methodTags}
+            </div>
         </header>
         
         <div class="modal-summary">
-            <p>${escapeHtml(study.summary)}</p>
+            <p>${highlightText(study.summary, searchQuery)}</p>
         </div>
         
         <div class="modal-stats">
@@ -490,21 +556,21 @@ function renderGoldStudyModal(study) {
         ${study.intervention ? `
         <div class="modal-section">
             <h2 class="modal-section-title">Intervention</h2>
-            <p class="modal-section-content">${escapeHtml(study.intervention)}</p>
+            <p class="modal-section-content">${highlightText(study.intervention, searchQuery)}</p>
         </div>
         ` : ''}
         
         ${study.population ? `
         <div class="modal-section">
             <h2 class="modal-section-title">Population</h2>
-            <p class="modal-section-content">${escapeHtml(study.population)}</p>
+            <p class="modal-section-content">${highlightText(study.population, searchQuery)}</p>
         </div>
         ` : ''}
         
         ${study.outcomeName ? `
         <div class="modal-section">
             <h2 class="modal-section-title">Outcome Measured</h2>
-            <p class="modal-section-content">${escapeHtml(study.outcomeName)}</p>
+            <p class="modal-section-content">${highlightText(study.outcomeName, searchQuery)}</p>
         </div>
         ` : ''}
         
@@ -523,15 +589,19 @@ function renderGoldStudyModal(study) {
  * Render weak evidence study modal content
  */
 function renderWeakStudyModal(study) {
+    const methodTags = renderMethodTags(study, 'modal');
     return `
         <header class="modal-header">
             <p class="modal-category">${escapeHtml(study.category)}</p>
-            <h1 class="modal-title" id="modal-title">${escapeHtml(study.headline)}</h1>
-            <span class="modal-tier study-tier-weak">Weak Evidence</span>
+            <h1 class="modal-title" id="modal-title">${highlightText(study.headline, searchQuery)}</h1>
+            <div class="modal-badges">
+                <span class="modal-tier study-tier-weak">Weak Evidence</span>
+                ${methodTags}
+            </div>
         </header>
         
         <div class="modal-summary">
-            <p>${escapeHtml(study.summary)}</p>
+            <p>${highlightText(study.summary, searchQuery)}</p>
         </div>
         
         <div class="modal-stats">
@@ -548,14 +618,14 @@ function renderWeakStudyModal(study) {
         ${study.whyWeak ? `
         <div class="modal-section">
             <h2 class="modal-section-title">Why we can't trust this</h2>
-            <p class="modal-section-content">${escapeHtml(study.whyWeak)}</p>
+            <p class="modal-section-content">${highlightText(study.whyWeak, searchQuery)}</p>
         </div>
         ` : ''}
         
         ${study.confounders ? `
         <div class="modal-section">
             <h2 class="modal-section-title">Other possible explanations</h2>
-            <p class="modal-section-content">${escapeHtml(study.confounders)}</p>
+            <p class="modal-section-content">${highlightText(study.confounders, searchQuery)}</p>
         </div>
         ` : ''}
         
@@ -588,6 +658,48 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+/**
+ * Helper: Escape regex characters
+ */
+function escapeRegExp(text) {
+    return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Helper: Highlight matching search terms
+ */
+function highlightText(text, query) {
+    if (!text) return '';
+    if (!query) return escapeHtml(text);
+
+    const terms = query.split(/\s+/).map(term => term.trim()).filter(Boolean);
+    if (terms.length === 0) {
+        return escapeHtml(text);
+    }
+
+    const uniqueTerms = Array.from(new Set(terms)).sort((a, b) => b.length - a.length);
+    const pattern = uniqueTerms.map(escapeRegExp).join('|');
+    const regex = new RegExp(pattern, 'gi');
+    let result = '';
+    let lastIndex = 0;
+    let hasMatch = false;
+
+    for (const match of text.matchAll(regex)) {
+        hasMatch = true;
+        const matchIndex = match.index ?? 0;
+        result += escapeHtml(text.slice(lastIndex, matchIndex));
+        result += `<mark class="search-highlight">${escapeHtml(match[0])}</mark>`;
+        lastIndex = matchIndex + match[0].length;
+    }
+
+    if (!hasMatch) {
+        return escapeHtml(text);
+    }
+
+    result += escapeHtml(text.slice(lastIndex));
+    return result;
 }
 
 /**

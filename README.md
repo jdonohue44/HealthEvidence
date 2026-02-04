@@ -100,8 +100,11 @@ Claims labeled "Weak Evidence" typically come from:
 ## Data Sources
 
 - **ClinicalTrials.gov**: U.S. registry of clinical trials (primary source for strong evidence)
-- **WHO ICTRP**: International trial registry platform (planned future expansion)
-- **PubMed**: For weak evidence curation and study context
+- **WHO ICTRP Trial Search**: International trial registry platform for global trials
+- **PubMed**: Peer-reviewed literature for weak evidence curation and study context
+- **arXiv**: Preprints for emerging evidence (treated as preliminary)
+- **Data Colada**: Research commentary and methodological critiques
+- **Blind Spots (book)**: Reference for common reasoning errors and blind spots in evidence
 
 ---
 

@@ -21,6 +21,9 @@
     --color-gold-bg: #f0f5f2;
     --color-weak: #8b4513;
     --color-weak-bg: #fdf8f4;
+    --color-highlight: #fff4b5;
+    --color-meta: #7a5b00;
+    --color-meta-bg: #fff3cc;
     
     /* Typography */
     --font-serif: 'Newsreader', Georgia, 'Times New Roman', serif;
@@ -54,6 +57,9 @@
         --color-gold-bg: #1e2a22;
         --color-weak: #d4915c;
         --color-weak-bg: #2a231e;
+        --color-highlight: #4f4300;
+        --color-meta: #f5d98b;
+        --color-meta-bg: #3a2f12;
     }
 }
 
@@ -147,6 +153,13 @@ a:hover {
     list-style: none;
     gap: 0;
     overflow-x: auto;
+    max-width: 100%;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+}
+
+.nav-tabs::-webkit-scrollbar {
+    display: none;
 }
 
 /* Search */
@@ -157,12 +170,16 @@ a:hover {
 .search-input {
     font-family: var(--font-sans);
     font-size: 0.875rem;
+    line-height: 1.2;
+    height: 2.5rem;
     padding: var(--space-sm) var(--space-md);
     border: 1px solid var(--color-border);
     border-radius: 4px;
     background-color: var(--color-bg);
     color: var(--color-text);
     width: 240px;
+    appearance: none;
+    -webkit-appearance: none;
     transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
@@ -284,6 +301,15 @@ a:hover {
     font-weight: 500;
 }
 
+.search-highlight {
+    background-color: var(--color-highlight);
+    color: inherit;
+    padding: 0 0.1em;
+    border-radius: 2px;
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+}
+
 .search-count-gold,
 .search-count-weak {
     display: inline-block;
@@ -334,6 +360,14 @@ a:hover {
     margin-bottom: var(--space-sm);
 }
 
+.study-badges {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
 .study-category {
     font-family: var(--font-sans);
     font-size: 0.75rem;
@@ -351,6 +385,27 @@ a:hover {
     letter-spacing: 0.03em;
     padding: var(--space-xs) var(--space-sm);
     border-radius: 2px;
+}
+
+.study-method {
+    font-family: var(--font-sans);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: var(--space-xs) var(--space-sm);
+    border-radius: 2px;
+    white-space: nowrap;
+}
+
+.study-method-rct {
+    color: var(--color-gold);
+    background-color: var(--color-gold-bg);
+}
+
+.study-method-meta {
+    color: var(--color-meta);
+    background-color: var(--color-meta-bg);
 }
 
 .study-tier-gold {
@@ -501,6 +556,13 @@ a:hover {
     margin-bottom: var(--space-lg);
 }
 
+.modal-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+    margin-top: var(--space-sm);
+}
+
 .modal-category {
     font-size: 0.75rem;
     font-weight: 600;
@@ -534,6 +596,26 @@ a:hover {
     letter-spacing: 0.03em;
     padding: var(--space-xs) var(--space-sm);
     border-radius: 2px;
+}
+
+.modal-method {
+    font-family: var(--font-sans);
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: var(--space-xs) var(--space-sm);
+    border-radius: 2px;
+}
+
+.modal-method-rct {
+    color: var(--color-gold);
+    background-color: var(--color-gold-bg);
+}
+
+.modal-method-meta {
+    color: var(--color-meta);
+    background-color: var(--color-meta-bg);
 }
 
 .modal-summary {
@@ -662,8 +744,15 @@ a:hover {
 @media (max-width: 768px) {
     .nav-row {
         flex-direction: column;
+        align-items: stretch;
         gap: var(--space-sm);
         padding: var(--space-sm) 0;
+    }
+
+    .nav-tabs {
+        width: 100%;
+        padding: 0 var(--space-sm);
+        scroll-padding-left: var(--space-sm);
     }
     
     .search-container {
