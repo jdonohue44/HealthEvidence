@@ -17,17 +17,33 @@ from categories import assign_category
 
 BASE_URL = "https://clinicaltrials.gov/api/v2"
 
+# Topic focus for health/nutrition/exercise trials
+TOPIC_TERMS = [
+    "obesity", "overweight", "diabetes", "\"type 2 diabetes\"", "hypertension",
+    "\"blood pressure\"", "cholesterol", "lipid", "cardiovascular", "heart",
+    "metabolic", "\"weight loss\"", "nutrition", "diet", "dietary", "fiber",
+    "supplement", "vitamin", "probiotic", "\"omega-3\"",
+    "\"physical activity\"", "exercise", "fitness", "strength",
+    "\"resistance training\"", "aerobic", "sleep", "insomnia", "stress",
+    "anxiety", "depression", "\"mental health\"", "\"well-being\"",
+    "inflammation", "\"gut microbiome\"", "bone", "\"bone density\"",
+    "muscle", "frailty", "aging", "longevity"
+]
+TOPIC_QUERY = " OR ".join(TOPIC_TERMS)
+
 # Query for health/nutrition/exercise RCTs from 2020-2026
-QUERY = """
+QUERY = f"""
 AREA[StudyType]INTERVENTIONAL AND
 AREA[DesignAllocation]RANDOMIZED AND
 AREA[OverallStatus]COMPLETED AND
 AREA[HasResults]true AND
 AREA[OutcomeMeasureReportingStatus]POSTED AND
 AREA[CompletionDate]RANGE[01/01/2020,12/31/2026] AND
-(AREA[ConditionSearch](obesity OR diabetes OR cardiovascular OR hypertension OR 
-nutrition OR diet OR exercise OR "physical activity" OR "weight loss" OR 
-cholesterol OR "blood pressure" OR fitness OR metabolic))
+(
+  AREA[ConditionSearch]({TOPIC_QUERY}) OR
+  AREA[BriefTitle]({TOPIC_QUERY}) OR
+  AREA[InterventionName]({TOPIC_QUERY})
+)
 """
 
 
@@ -78,6 +94,100 @@ def parse_pvalue(p_value) -> Optional[float]:
             return None
     
     return None
+
+
+def is_mean_param(param_type: Optional[str]) -> bool:
+    """Check if the parameter type represents a mean."""
+    if not param_type:
+        return True
+    param = str(param_type).strip().lower()
+    if "median" in param:
+        return False
+    return "mean" in param
+
+
+def is_baseline_label(label: str) -> bool:
+    """Heuristic to detect baseline-only measurements."""
+    if not label:
+        return False
+    label = label.lower()
+    return any(term in label for term in ["baseline", "pre-treatment", "pretreatment", "pre treatment", "screening"])
+
+
+def parse_dispersion_to_sd(measurement: Dict, group_n: Optional[float]) -> Optional[float]:
+    """
+    Convert dispersion data to a standard deviation when possible.
+    """
+    dispersion_value = safe_float(measurement.get("dispersionValue"))
+    dispersion_type = str(measurement.get("dispersionType") or "").strip().lower()
+    sd = None
+
+    if dispersion_value is not None:
+        if dispersion_type == "" or "standard deviation" in dispersion_type or dispersion_type in {"sd", "stdev"}:
+            sd = dispersion_value
+        elif "standard error" in dispersion_type or dispersion_type in {"se", "sem"}:
+            if group_n:
+                sd = dispersion_value * math.sqrt(group_n)
+        elif "confidence interval" in dispersion_type or dispersion_type == "ci":
+            sd = None
+
+    upper = safe_float(measurement.get("upperLimit"))
+    lower = safe_float(measurement.get("lowerLimit"))
+    if sd is None and upper is not None and lower is not None and upper > lower:
+        width = upper - lower
+        if group_n:
+            sd = (width / (2 * 1.96)) * math.sqrt(group_n)
+        else:
+            sd = width / 4.0
+
+    return sd
+
+
+def select_analysis_p_value(analyses: List[Dict], control_id: str, treatment_id: str) -> Optional[float]:
+    """Pick the most specific analysis p-value for a control-treatment comparison."""
+    best_p = None
+    best_group_count = None
+
+    for analysis in analyses:
+        group_ids = analysis.get("groupIds", [])
+        if not group_ids or control_id not in group_ids or treatment_id not in group_ids:
+            continue
+
+        p_value = parse_pvalue(analysis.get("pValue"))
+        if p_value is None:
+            continue
+
+        group_count = len(group_ids)
+        if best_p is None or group_count < best_group_count:
+            best_p = p_value
+            best_group_count = group_count
+            if group_count <= 2:
+                break
+
+    return best_p
+
+
+def select_measurement_set(measurement_sets: List[Dict], control_id: str, treatment_id: str,
+                           denoms: Dict[str, float]) -> Optional[Dict]:
+    """Choose the best measurement set for a given control vs treatment pair."""
+    candidates = [s for s in measurement_sets if control_id in s["stats"] and treatment_id in s["stats"]]
+    if not candidates:
+        return None
+
+    non_baseline = [
+        s for s in candidates
+        if not is_baseline_label(f"{s.get('class_title', '')} {s.get('category_title', '')}")
+    ]
+    if non_baseline:
+        candidates = non_baseline
+
+    def score(set_data: Dict) -> tuple:
+        stats = set_data["stats"]
+        sd_count = int(stats[control_id].get("sd") is not None) + int(stats[treatment_id].get("sd") is not None)
+        total_n = (denoms.get(control_id) or 0) + (denoms.get(treatment_id) or 0)
+        return (sd_count, total_n)
+
+    return max(candidates, key=score)
 
 
 def fetch_studies(page_size: int = 100, max_pages: int = 10) -> List[Dict]:
@@ -236,91 +346,110 @@ def extract_outcomes(study_data: Dict) -> List[Dict]:
     results = study_data.get("resultsSection", {})
     outcomes_module = results.get("outcomeMeasuresModule", {})
     outcome_measures = outcomes_module.get("outcomeMeasures", [])
-    
+
     extracted = []
-    
+
+    def valid_sd(value: Optional[float]) -> bool:
+        return value is not None and value > 0
+
+    def valid_n(value: Optional[float]) -> bool:
+        return value is not None and value > 1
+
     for outcome in outcome_measures:
         outcome_type = outcome.get("type", "").upper()
         outcome_title = outcome.get("title", "")
         outcome_description = outcome.get("description", "")
-        
+
         # Get groups
-        groups = {g["id"]: g["title"] for g in outcome.get("groups", [])}
-        
+        groups_list = outcome.get("groups", [])
+        groups = {g.get("id"): g.get("title", "") for g in groups_list if g.get("id")}
+
         # Identify control vs treatment groups
         control_id = None
-        for gid, title in groups.items():
-            title_lower = title.lower()
-            if any(term in title_lower for term in ["control", "placebo", "usual care", "standard", "sham"]):
-                control_id = gid
+        for group in groups_list:
+            group_type = str(group.get("type") or "").lower()
+            title_lower = str(group.get("title") or "").lower()
+            if "control" in group_type or "placebo" in group_type or "sham" in group_type:
+                control_id = group.get("id")
                 break
-        
+            if not control_id and any(term in title_lower for term in ["control", "placebo", "usual care", "standard", "sham"]):
+                control_id = group.get("id")
+
+        if not control_id:
+            for gid, title in groups.items():
+                title_lower = title.lower()
+                if any(term in title_lower for term in ["control", "placebo", "usual care", "standard", "sham"]):
+                    control_id = gid
+                    break
+
         if not control_id:
             continue
-        
+
         treatment_ids = [gid for gid in groups if gid != control_id]
         if not treatment_ids:
             continue
-        
+
         # Get denominators (sample sizes)
         denoms = {}
         for denom in outcome.get("denoms", []):
             for count in denom.get("counts", []):
                 gid = count.get("groupId")
                 value = safe_float(count.get("value"))
-                if gid and value:
+                if gid is not None and value is not None:
                     denoms[gid] = value
-        
+
         # Get measurements (means and dispersions)
-        stats = {}
+        measurement_sets = []
         for cls in outcome.get("classes", []):
+            class_title = cls.get("title", "")
             for cat in cls.get("categories", []):
+                category_title = cat.get("title", "")
+                stats = {}
                 for measurement in cat.get("measurements", []):
                     gid = measurement.get("groupId")
                     mean = safe_float(measurement.get("value"))
-                    
                     if gid is None or mean is None:
                         continue
-                    
-                    # Get standard deviation
-                    sd = None
-                    if "dispersionValue" in measurement:
-                        sd = safe_float(measurement.get("dispersionValue"))
-                    elif "upperLimit" in measurement and "lowerLimit" in measurement:
-                        upper = safe_float(measurement.get("upperLimit"))
-                        lower = safe_float(measurement.get("lowerLimit"))
-                        if upper is not None and lower is not None:
-                            # Approximate SD from confidence interval
-                            sd = (upper - lower) / 4.0
-                    
+
+                    param_type = measurement.get("paramType") or cat.get("paramType") or cls.get("paramType")
+                    if not is_mean_param(param_type):
+                        continue
+
+                    group_n = denoms.get(gid)
+                    sd = parse_dispersion_to_sd(measurement, group_n)
                     stats[gid] = {"mean": mean, "sd": sd}
-        
-        if control_id not in stats:
+
+                if stats:
+                    measurement_sets.append({
+                        "class_title": class_title,
+                        "category_title": category_title,
+                        "stats": stats
+                    })
+
+        if not measurement_sets:
             continue
-        
-        # Get p-value from analyses
-        p_value = None
-        for analysis in outcome.get("analyses", []):
-            analysis_groups = set(analysis.get("groupIds", []))
-            if control_id in analysis_groups and any(tid in analysis_groups for tid in treatment_ids):
-                p_value = parse_pvalue(analysis.get("pValue"))
-                if p_value is not None:
-                    break
-        
+
+        analyses = outcome.get("analyses", [])
+
         # Process each treatment group
         for tid in treatment_ids:
-            if tid not in stats:
+            measurement_set = select_measurement_set(measurement_sets, control_id, tid, denoms)
+            if not measurement_set:
                 continue
-            
+
+            stats = measurement_set["stats"]
             control_stats = stats[control_id]
             treatment_stats = stats[tid]
-            
+
             control_n = denoms.get(control_id)
             treatment_n = denoms.get(tid)
-            
+
+            # Use the most specific analysis p-value when available
+            calculated_p = select_analysis_p_value(analyses, control_id, tid)
+
             # Calculate effect size if we have SDs
             effect_d = None
-            if all([control_stats.get("sd"), treatment_stats.get("sd"), control_n, treatment_n]):
+            if valid_sd(control_stats.get("sd")) and valid_sd(treatment_stats.get("sd")) and valid_n(control_n) and valid_n(treatment_n):
                 effect_d = cohens_d(
                     mean_treatment=treatment_stats["mean"],
                     mean_control=control_stats["mean"],
@@ -329,13 +458,9 @@ def extract_outcomes(study_data: Dict) -> List[Dict]:
                     n_treatment=treatment_n,
                     n_control=control_n
                 )
-            
+
             # Calculate p-value if not reported and we have the data
-            calculated_p = p_value
-            if calculated_p is None and all([
-                control_stats.get("sd"), treatment_stats.get("sd"),
-                control_n, treatment_n
-            ]):
+            if calculated_p is None and valid_sd(control_stats.get("sd")) and valid_sd(treatment_stats.get("sd")) and valid_n(control_n) and valid_n(treatment_n):
                 from scipy.stats import ttest_ind_from_stats
                 try:
                     _, calculated_p = ttest_ind_from_stats(
@@ -349,15 +474,15 @@ def extract_outcomes(study_data: Dict) -> List[Dict]:
                     )
                 except Exception:
                     pass
-            
+
             total_n = (control_n or 0) + (treatment_n or 0)
-            
+
             # Calculate ultra-significance score
             score = ultra_significance_score(calculated_p, effect_d, total_n)
-            
+
             # Determine evidence tier (now includes sample size requirement)
             tier = determine_evidence_tier(calculated_p, effect_d, sample_size=total_n, is_rct=True)
-            
+
             extracted.append({
                 "outcome_type": outcome_type,
                 "outcome_name": outcome_title,
@@ -376,7 +501,7 @@ def extract_outcomes(study_data: Dict) -> List[Dict]:
                 "ultra_score": score,
                 "evidence_tier": tier,
             })
-    
+
     return extracted
 
 
