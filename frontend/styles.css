@@ -433,6 +433,55 @@ a:hover {
     color: var(--color-text);
 }
 
+/* Study Verdict */
+.study-verdict {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-md);
+    padding: var(--space-sm) 0;
+}
+
+.verdict-label {
+    font-family: var(--font-sans);
+    font-size: 1rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+
+.verdict-confidence {
+    font-family: var(--font-sans);
+    font-size: 0.8125rem;
+    color: var(--color-text-muted);
+}
+
+/* Verdict color variants */
+.verdict-yes .verdict-label {
+    color: var(--color-gold);
+}
+
+.verdict-likely .verdict-label {
+    color: var(--color-gold);
+    opacity: 0.85;
+}
+
+.verdict-no .verdict-label {
+    color: var(--color-text);
+}
+
+.verdict-probably-not .verdict-label {
+    color: var(--color-text-secondary);
+}
+
+.verdict-weak .verdict-label {
+    color: var(--color-weak);
+}
+
+.verdict-uncertain .verdict-label {
+    color: var(--color-text-muted);
+}
+
 /* Formal study title (below headline) */
 .study-formal-title {
     font-family: var(--font-sans);

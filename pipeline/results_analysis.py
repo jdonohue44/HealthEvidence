@@ -1,5 +1,5 @@
 """
-Enhanced script to analyze results from completed RCTs retrieved from ClinicalTrials.gov.
+Script to analyze results from completed RCTs retrieved from ClinicalTrials.gov.
 
 This script queries the ClinicalTrials.gov API for completed randomized controlled
 trials (RCTs) in health, nutrition, and exercise domains from 2020-2026.
@@ -18,16 +18,45 @@ from categories import assign_category
 BASE_URL = "https://clinicaltrials.gov/api/v2"
 
 # Topic focus for health/nutrition/exercise trials
+# Includes controversial/popular health topics people search for
 TOPIC_TERMS = [
-    "obesity", "overweight", "diabetes", "\"type 2 diabetes\"", "hypertension",
+    # Weight and metabolic
+    "obesity", "overweight", "metabolic", "\"weight loss\"", "\"weight gain\"",
+    
+    # Cardiovascular
     "\"blood pressure\"", "cholesterol", "lipid", "cardiovascular", "heart",
-    "metabolic", "\"weight loss\"", "nutrition", "diet", "dietary", "fiber",
-    "supplement", "vitamin", "probiotic", "\"omega-3\"",
+    
+    # Nutrition basics
+    "nutrition", "diet", "dietary", "fiber", "supplement", "vitamin", "probiotic", "\"omega-3\"",
+    
+    # Controversial foods - eggs, meat, fats
+    "egg", "eggs", "\"red meat\"", "\"processed meat\"", "\"processed food\"",
+    "\"saturated fat\"", "\"trans fat\"", "butter", "\"coconut oil\"",
+    
+    # Sweeteners and sugar
+    "sweetener", "\"artificial sweetener\"", "aspartame", "sucralose",
+    "sugar", "\"added sugar\"", "\"high fructose\"", "stevia",
+    
+    # Salt and sodium
+    "salt", "sodium",
+    
+    # Beverages
+    "coffee", "caffeine", "alcohol", "wine", "\"energy drink\"",
+    
+    # Supplements and vaccines
+    "vaccination", "vaccine", "multivitamin", "\"fish oil\"",
+    
+    # Exercise and activity
     "\"physical activity\"", "exercise", "fitness", "strength",
-    "\"resistance training\"", "aerobic", "sleep", "insomnia", "stress",
-    "anxiety", "depression", "\"mental health\"", "\"well-being\"",
+    "\"resistance training\"", "stretching", "yoga", "running", "walking",
+    
+    # Sleep and mental health
+    "sleep", "insomnia", "stress", "anxiety", "depression", 
+    "\"mental health\"", "\"well-being\"",
+    
+    # Other health topics
     "inflammation", "\"gut microbiome\"", "bone", "\"bone density\"",
-    "muscle", "frailty", "aging", "longevity"
+    "muscle", "frailty", "aging", "longevity", "fasting", "\"intermittent fasting\""
 ]
 TOPIC_QUERY = " OR ".join(TOPIC_TERMS)
 

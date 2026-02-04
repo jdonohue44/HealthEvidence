@@ -32,6 +32,70 @@ function detectRandomized(text) {
 }
 
 /**
+ * Determine verdict based on evidence tier and effect direction
+ * Returns object with verdict text and confidence level
+ */
+function determineVerdict(study) {
+    // For weak evidence studies
+    if (study.type === 'weak' || study.evidenceTier === 'WEAK') {
+        return {
+            verdict: 'Probably not',
+            confidence: 'Evidence is weak or flawed',
+            className: 'verdict-weak'
+        };
+    }
+    
+    // For strong evidence, determine direction from effect or headline
+    const hasPositiveEffect = study.effectSize > 0 || 
+        (study.treatmentMean !== null && study.controlMean !== null && study.treatmentMean > study.controlMean);
+    
+    // Check headline for negative indicators
+    const headline = (study.headline || study.title || '').toLowerCase();
+    const isNegativeOutcome = headline.includes('no difference') || 
+        headline.includes('no effect') || 
+        headline.includes('similar') ||
+        headline.includes('doesn\'t') ||
+        headline.includes('does not');
+    
+    if (study.evidenceTier === 'GOLD') {
+        if (isNegativeOutcome) {
+            return {
+                verdict: 'No',
+                confidence: 'Strong evidence shows no effect',
+                className: 'verdict-no'
+            };
+        }
+        return {
+            verdict: 'Yes',
+            confidence: 'Strong evidence supports this',
+            className: 'verdict-yes'
+        };
+    }
+    
+    if (study.evidenceTier === 'SILVER') {
+        if (isNegativeOutcome) {
+            return {
+                verdict: 'Probably not',
+                confidence: 'Good evidence suggests no effect',
+                className: 'verdict-probably-not'
+            };
+        }
+        return {
+            verdict: 'Likely yes',
+            confidence: 'Good evidence supports this',
+            className: 'verdict-likely'
+        };
+    }
+    
+    // Bronze or unknown
+    return {
+        verdict: 'Uncertain',
+        confidence: 'More research needed',
+        className: 'verdict-uncertain'
+    };
+}
+
+/**
  * Initialize the application
  */
 async function init() {
@@ -360,13 +424,98 @@ function renderStudies() {
 }
 
 /**
+ * Convert a statement headline into a question
+ * "Eating more fiber lowers blood pressure" -> "Does eating more fiber lower blood pressure?"
+ */
+function convertToQuestion(headline) {
+    if (!headline) return headline;
+    
+    // Already a question
+    if (headline.trim().endsWith('?')) {
+        return headline;
+    }
+    
+    const lowerHeadline = headline.toLowerCase();
+    
+    // Pattern: "X reduces/lowers/improves/helps/increases Y"
+    // Convert to "Does X reduce/lower/improve/help/increase Y?"
+    const actionPatterns = [
+        { regex: /^(.+?)\s+(reduces?)\s+(.+)$/i, verb: 'reduce' },
+        { regex: /^(.+?)\s+(lowers?)\s+(.+)$/i, verb: 'lower' },
+        { regex: /^(.+?)\s+(improves?)\s+(.+)$/i, verb: 'improve' },
+        { regex: /^(.+?)\s+(helps?)\s+(.+)$/i, verb: 'help' },
+        { regex: /^(.+?)\s+(increases?)\s+(.+)$/i, verb: 'increase' },
+        { regex: /^(.+?)\s+(prevents?)\s+(.+)$/i, verb: 'prevent' },
+        { regex: /^(.+?)\s+(causes?)\s+(.+)$/i, verb: 'cause' },
+        { regex: /^(.+?)\s+(boosts?)\s+(.+)$/i, verb: 'boost' },
+        { regex: /^(.+?)\s+(affects?)\s+(.+)$/i, verb: 'affect' },
+        { regex: /^(.+?)\s+(protects?)\s+(.+)$/i, verb: 'protect' },
+    ];
+    
+    for (const { regex, verb } of actionPatterns) {
+        const match = headline.match(regex);
+        if (match) {
+            const subject = match[1].trim();
+            const object = match[3].trim();
+            // Capitalize first letter of subject
+            const capitalSubject = subject.charAt(0).toLowerCase() + subject.slice(1);
+            return `Does ${capitalSubject} ${verb} ${object}?`;
+        }
+    }
+    
+    // Pattern: "X is/are good/bad for Y"
+    const qualityMatch = headline.match(/^(.+?)\s+(is|are)\s+(good|bad|better|worse|healthy|unhealthy|beneficial|harmful)\s+(for\s+.+)$/i);
+    if (qualityMatch) {
+        const subject = qualityMatch[1].trim();
+        const verb = qualityMatch[2].toLowerCase();
+        const quality = qualityMatch[3].toLowerCase();
+        const rest = qualityMatch[4].trim();
+        const capitalSubject = subject.charAt(0).toLowerCase() + subject.slice(1);
+        return `${verb === 'is' ? 'Is' : 'Are'} ${capitalSubject} ${quality} ${rest}?`;
+    }
+    
+    // Pattern: "X works/helps for Y" -> "Does X work/help for Y?"
+    const worksMatch = headline.match(/^(.+?)\s+(works?|helps?)\s+(for|with|against)\s+(.+)$/i);
+    if (worksMatch) {
+        const subject = worksMatch[1].trim();
+        const verb = worksMatch[2].toLowerCase().replace(/s$/, '');
+        const prep = worksMatch[3].toLowerCase();
+        const object = worksMatch[4].trim();
+        const capitalSubject = subject.charAt(0).toLowerCase() + subject.slice(1);
+        return `Does ${capitalSubject} ${verb} ${prep} ${object}?`;
+    }
+    
+    // Pattern: Starting with verb (imperative) - "Get more sleep..." -> "Should you get more sleep...?"
+    const imperativeMatch = headline.match(/^(get|eat|drink|take|try|do|exercise|walk|run|sleep|avoid)\s+(.+)$/i);
+    if (imperativeMatch) {
+        const verb = imperativeMatch[1].toLowerCase();
+        const rest = imperativeMatch[2].trim();
+        return `Should you ${verb} ${rest}?`;
+    }
+    
+    // Fallback: prepend "Does" or check if it's about a claim
+    // If headline contains "may", "might", "could" - ask if it's true
+    if (/\b(may|might|could|can)\b/i.test(headline)) {
+        return `Is it true that ${headline.charAt(0).toLowerCase()}${headline.slice(1)}?`;
+    }
+    
+    // Last resort: Just add "Does" at the start if it seems like a statement about effects
+    if (/\b(effect|impact|benefit|risk|outcome)\b/i.test(lowerHeadline)) {
+        return headline + '?';
+    }
+    
+    // Return as-is if we can't convert it
+    return headline;
+}
+
+/**
  * Generate a simple, scannable headline from study data
  * Grandma-friendly: what was tested and what happened
  */
 function generateSimpleHeadline(study) {
     // If we have a pre-generated simple headline, use it
     if (study.simpleHeadline) {
-        return study.simpleHeadline;
+        return convertToQuestion(study.simpleHeadline);
     }
     
     // Otherwise, try to simplify the existing headline
@@ -384,7 +533,8 @@ function generateSimpleHeadline(study) {
         .replace(/significantly /gi, '')
         .replace(/statistically /gi, '');
     
-    return headline;
+    // Convert to question format
+    return convertToQuestion(headline);
 }
 
 /**
@@ -425,6 +575,16 @@ function renderGoldStudyArticle(study) {
     if (study.sampleSize > 0) {
         meta.push(`${study.sampleSize.toLocaleString()} people tested`);
     }
+    // Add p-value to footer
+    if (study.pValue !== null && study.pValue !== undefined && !isNaN(study.pValue)) {
+        meta.push(`p ${formatPValue(study.pValue)}`);
+    }
+    // Add effect size to footer
+    if (study.effectSize !== null && study.effectSize !== undefined && !isNaN(study.effectSize)) {
+        const effectLabel = Math.abs(study.effectSize) >= 0.8 ? 'large effect' : 
+                           Math.abs(study.effectSize) >= 0.5 ? 'medium effect' : 'small effect';
+        meta.push(effectLabel);
+    }
     if (study.completionDate) {
         meta.push(formatDate(study.completionDate));
     }
@@ -432,6 +592,7 @@ function renderGoldStudyArticle(study) {
     const simpleHeadline = generateSimpleHeadline(study);
     const hasFullTitle = study.title && study.title !== simpleHeadline;
     const methodTags = renderMethodTags(study);
+    const verdict = determineVerdict(study);
     
     return `
         <article class="study-article" data-study-id="${escapeHtml(study.id)}" data-study-type="gold" tabindex="0" role="button">
@@ -443,6 +604,10 @@ function renderGoldStudyArticle(study) {
                 </div>
             </header>
             <h2 class="study-headline">${highlightText(simpleHeadline, searchQuery)}</h2>
+            <div class="study-verdict ${verdict.className}">
+                <span class="verdict-label">${verdict.verdict}</span>
+                <span class="verdict-confidence">${verdict.confidence}</span>
+            </div>
             ${hasFullTitle ? `<p class="study-formal-title">${highlightText(study.title, searchQuery)}</p>` : ''}
             <p class="study-summary">${highlightText(truncateSummary(study.summary), searchQuery)}</p>
             <footer class="study-meta">
@@ -457,6 +622,9 @@ function renderGoldStudyArticle(study) {
  */
 function renderWeakStudyArticle(study) {
     const methodTags = renderMethodTags(study);
+    const verdict = determineVerdict(study);
+    // Convert headline to question format if not already a question
+    const questionHeadline = convertToQuestion(study.headline);
     return `
         <article class="study-article study-article-weak" data-study-id="${escapeHtml(study.id)}" data-study-type="weak" tabindex="0" role="button">
             <header class="study-header">
@@ -466,7 +634,11 @@ function renderWeakStudyArticle(study) {
                     ${methodTags}
                 </div>
             </header>
-            <h2 class="study-headline">${highlightText(study.headline, searchQuery)}</h2>
+            <h2 class="study-headline">${highlightText(questionHeadline, searchQuery)}</h2>
+            <div class="study-verdict ${verdict.className}">
+                <span class="verdict-label">${verdict.verdict}</span>
+                <span class="verdict-confidence">${verdict.confidence}</span>
+            </div>
             <p class="study-summary">${highlightText(truncateSummary(study.summary), searchQuery)}</p>
             <footer class="study-meta">
                 ${study.studyType ? escapeHtml(study.studyType) : ''}

@@ -13,7 +13,17 @@ NUTRITION_KEYWORDS = [
     'carbohydrate', 'fat intake', 'sodium', 'salt', 'sugar',
     'mediterranean', 'dash diet', 'ketogenic', 'low-carb', 'plant-based',
     'vegan', 'vegetarian', 'whole grain', 'fruit', 'vegetable',
-    'omega-3', 'fish oil', 'probiotic', 'prebiotic'
+    'omega-3', 'fish oil', 'probiotic', 'prebiotic',
+    # Controversial foods
+    'egg', 'eggs', 'red meat', 'processed meat', 'processed food',
+    'saturated fat', 'trans fat', 'butter', 'coconut oil',
+    # Sweeteners
+    'sweetener', 'artificial sweetener', 'aspartame', 'sucralose', 'stevia',
+    'added sugar', 'high fructose',
+    # Beverages
+    'coffee', 'caffeine', 'alcohol', 'wine',
+    # Fasting
+    'intermittent fasting', 'time-restricted'
 ]
 
 EXERCISE_KEYWORDS = [
