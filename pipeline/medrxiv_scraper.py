@@ -50,7 +50,7 @@ TOPIC_TERMS = [
 TOPIC_PATTERN = re.compile("|".join(re.escape(t) for t in TOPIC_TERMS), re.I)
 
 
-def fetch_interval(start: str, end: str, server: str = "medrxiv") -> List[Dict]:
+def fetch_interval(start: str, end: str, server: str = "medrxiv", max_records: Optional[int] = None) -> List[Dict]:
     """
     Fetch preprints from medRxiv API within a date range.
     
@@ -77,6 +77,8 @@ def fetch_interval(start: str, end: str, server: str = "medrxiv") -> List[Dict]:
             results.extend(batch)
             cursor += 100
             print(f"  Fetched {len(results)} records...")
+            if max_records and len(results) >= max_records:
+                break
         except requests.RequestException as e:
             print(f"Error fetching from medRxiv: {e}")
             break
@@ -321,17 +323,38 @@ def fetch_and_process(start_date: str = None, end_date: str = None, max_results:
         end_date = dt.date.today().isoformat()
     
     print(f"Fetching medRxiv preprints from {start_date} to {end_date}...")
-    raw_records = fetch_interval(start_date, end_date)
-    print(f"Found {len(raw_records)} total records")
-    
     print("Processing records...")
     processed = []
-    for record in raw_records:
-        result = process_medrxiv_record(record)
-        if result:
-            processed.append(result)
-            if len(processed) >= max_results:
-                break
+    cursor = 0
+    fetched = 0
+
+    while True:
+        url = f"https://api.medrxiv.org/details/medrxiv/{start_date}/{end_date}/{cursor}/json"
+        try:
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+            batch = response.json().get("collection", [])
+        except requests.RequestException as e:
+            print(f"Error fetching from medRxiv: {e}")
+            break
+
+        if not batch:
+            break
+
+        fetched += len(batch)
+        print(f"  Fetched {fetched} records...")
+
+        for record in batch:
+            result = process_medrxiv_record(record)
+            if result:
+                processed.append(result)
+                if len(processed) >= max_results:
+                    break
+
+        if len(processed) >= max_results:
+            break
+
+        cursor += 100
     
     # Sort by ultra_score descending
     processed.sort(key=lambda x: x.get("ultra_score", 0), reverse=True)
