@@ -544,8 +544,9 @@ function renderMethodTags(study, classPrefix = 'study') {
     const tags = [];
 
     if (study.isRandomized) {
+        // Use a gold medal SVG to make randomized trials more prominent while keeping accessible text
         tags.push({
-            label: 'Randomized trial',
+            label: `<img src="img/rct_gold_medal.svg" alt="Randomized trial" class="rct-medal" /><span class="${classPrefix}-method-label">Randomized trial</span>`,
             className: `${classPrefix}-method ${classPrefix}-method-rct`
         });
     }
@@ -593,6 +594,7 @@ function renderGoldStudyArticle(study) {
     const hasFullTitle = study.title && study.title !== simpleHeadline;
     const methodTags = renderMethodTags(study);
     const verdict = determineVerdict(study);
+    const ateText = formatATE(study);
     
     return `
         <article class="study-article" data-study-id="${escapeHtml(study.id)}" data-study-type="gold" tabindex="0" role="button">
@@ -610,6 +612,7 @@ function renderGoldStudyArticle(study) {
             </div>
             ${hasFullTitle ? `<p class="study-formal-title">${highlightText(study.title, searchQuery)}</p>` : ''}
             <p class="study-summary">${highlightText(truncateSummary(study.summary), searchQuery)}</p>
+            ${ateText ? `<p class="study-ate">${escapeHtml(ateText)}</p>` : ''}
             <footer class="study-meta">
                 ${meta.map(m => escapeHtml(m)).join('<span class="study-meta-divider">·</span>')}
             </footer>
@@ -743,6 +746,13 @@ function renderGoldStudyModal(study) {
         <div class="modal-section">
             <h2 class="modal-section-title">Outcome Measured</h2>
             <p class="modal-section-content">${highlightText(study.outcomeName, searchQuery)}</p>
+        </div>
+        ` : ''}
+
+        ${formatATE(study) ? `
+        <div class="modal-section">
+            <h2 class="modal-section-title">Average treatment effect</h2>
+            <p class="modal-section-content">${escapeHtml(formatATE(study))}</p>
         </div>
         ` : ''}
         
@@ -939,6 +949,148 @@ function formatPValue(pValue) {
     }
     
     return pValue.toFixed(4);
+}
+
+/**
+ * Helper: Extract unit string from an outcome name, if present
+ * Returns a lowercase short token (e.g. 'kg', 'lbs', '%', 'mmhg', 'bpm', 'mg/dL', 'cm', 'mL') or empty string
+ */
+function extractUnitFromOutcome(outcomeName) {
+    if (!outcomeName) return '';
+
+    // Look for a unit in parentheses: "Weight (kg)" or "Weight change (lbs)"
+    const parenMatch = outcomeName.match(/\(([^)]+)\)/);
+    if (parenMatch && parenMatch[1]) {
+        const candidate = parenMatch[1].trim();
+        const unitMatch = candidate.match(/kg|lb|lbs|%|mmhg|bpm|mg\/?dl|cm|mm|mL|ml/i);
+        if (unitMatch) {
+            const u = unitMatch[0].toLowerCase().replace(/ml/i, 'mL').replace(/mg\/dl/i, 'mg/dL');
+            return u;
+        }
+        return candidate.toLowerCase();
+    }
+
+    // Look for units elsewhere in the string
+    const elsewhere = outcomeName.match(/kg|lb|lbs|%|mmhg|bpm|mg\/?dl|cm|mm|mL|ml/i);
+    if (elsewhere) return elsewhere[0].toLowerCase().replace(/ml/i, 'mL').replace(/mg\/dl/i, 'mg/dL');
+
+    return '';
+}
+
+/**
+ * Infer a likely unit from keywords when no explicit unit is present
+ */
+function inferUnitFromKeywords(outcomeName = '', outcomeType = '') {
+    const lower = `${outcomeName} ${outcomeType}`.toLowerCase();
+
+    if (/weight|weight change|weight loss|body weight|weight gain|kg body weight|lbs|pounds/.test(lower)) return 'lbs';
+    if (/blood pressure|systolic|diastolic|mmhg/.test(lower)) return 'mmHg';
+    if (/cholesterol|hdl|ldl|triglyceride|triglycerides|lipid/.test(lower)) return 'mg/dL';
+    if (/glucose|blood sugar|glyco|hba1c/.test(lower)) return 'mg/dL';
+    if (/heart rate|bpm|beats per minute/.test(lower)) return 'bpm';
+    if (/percent|percentage|rate|percentage point|%/.test(lower)) return '%';
+    if (/bmi/.test(lower)) return 'points';
+    if (/height|waist|cm|inches|inch/.test(lower)) return 'in';
+    if (/volume|ml|mL|milliliter/.test(lower)) return 'mL';
+
+    return '';
+}
+
+/**
+ * Convert a numeric value from a source unit into American-standard unit (lbs, in, etc.)
+ * Returns { value: number, unit: string }
+ */
+function convertValueToAmerican(value, fromUnit) {
+    if (fromUnit == null || fromUnit === '') return { value, unit: 'units' };
+    const u = String(fromUnit).toLowerCase();
+
+    if (u === 'kg') {
+        return { value: value * 2.20462, unit: 'lbs' };
+    }
+    if (u === 'lb' || u === 'lbs' || u === 'pounds') {
+        return { value: value, unit: 'lbs' };
+    }
+    if (u === 'cm') {
+        return { value: value * 0.393701, unit: 'in' };
+    }
+    if (u === 'mm') {
+        return { value: value * 0.0393701, unit: 'in' };
+    }
+    if (u === 'm' || u === 'meter' || u === 'metre') {
+        return { value: value * 39.3701, unit: 'in' };
+    }
+    if (u === 'ml' || u === 'mL') {
+        return { value: value, unit: 'mL' };
+    }
+    if (u === 'mg/dl' || u === 'mg/dl') {
+        return { value: value, unit: 'mg/dL' };
+    }
+    if (u === 'mmhg') {
+        return { value: value, unit: 'mmHg' };
+    }
+    if (u === '%' || u === 'percent' || u === 'percentage') {
+        return { value: value, unit: '%' };
+    }
+    if (u === 'bpm') {
+        return { value: value, unit: 'bpm' };
+    }
+
+    // Unknown -> return as-is but label 'units'
+    return { value, unit: fromUnit };
+}
+
+/**
+ * Helper: Format the ATE (average treatment effect) in plain English when possible
+ * Returns an empty string when not applicable (missing means or not statistically significant)
+ * Uses American units where possible and requires p < 0.001 to display
+ */
+function formatATE(study) {
+    // Need both means and a p-value that indicates significance
+    if (study.treatmentMean == null || study.controlMean == null || study.pValue == null) return '';
+    if (isNaN(study.treatmentMean) || isNaN(study.controlMean) || isNaN(study.pValue)) return '';
+
+    // Only show when statistically significant at the stricter threshold p < 0.001
+    if (study.pValue >= 0.001) return '';
+
+    const diff = study.treatmentMean - study.controlMean;
+    const absDiff = Math.abs(diff);
+
+    // Detect a unit (explicit or inferred). Prefer explicit units in outcomeName.
+    let detectedUnit = extractUnitFromOutcome(study.outcomeName);
+    if (!detectedUnit) {
+        detectedUnit = inferUnitFromKeywords(study.outcomeName, study.outcomeType);
+    }
+
+    // If still not detected but outcomeType suggests percent
+    if (!detectedUnit && study.outcomeType && /percent|percentages|proportion|percentile/i.test(study.outcomeType)) {
+        detectedUnit = '%';
+    }
+
+    // Convert absolute difference to American unit where appropriate
+    const converted = convertValueToAmerican(absDiff, detectedUnit);
+    const rounded = Math.round(converted.value * 100) / 100; // two decimals
+
+    // Determine phrasing depending on unit type
+    const sign = diff < 0 ? 'lower' : 'higher';
+    let sentence = '';
+
+    if (converted.unit === 'lbs') {
+        const verb = diff < 0 ? 'lost an average of' : 'gained an average of';
+        sentence = `Treated participants ${verb} ${rounded} ${converted.unit} compared to the control group`;
+    } else if (converted.unit === '%') {
+        sentence = `Treated participants had an average ${rounded}% ${sign} compared to the control group`;
+    } else if (converted.unit === 'units' || !converted.unit) {
+        sentence = `Treated participants had an average difference of ${rounded} units compared to the control group`;
+    } else if (converted.unit === 'points') {
+        sentence = `Treated participants changed by an average of ${rounded} points compared to the control group`;
+    } else {
+        // general phrasing: 'were on average X UNIT lower/higher'
+        sentence = `Treated participants were on average ${rounded} ${converted.unit} ${sign} than the control group`;
+    }
+
+    const pText = !isNaN(study.pValue) ? ` (p = ${formatPValue(study.pValue)})` : '';
+
+    return sentence + pText + '.';
 }
 
 // Initialize on DOM ready

@@ -408,6 +408,37 @@ a:hover {
     background-color: var(--color-meta-bg);
 }
 
+/* Small gold medal icon used to highlight randomized trials */
+.rct-medal {
+    width: 20px;
+    height: 20px;
+    display: inline-block;
+    vertical-align: middle;
+    margin-right: 6px;
+}
+
+/* Screen-reader only helper */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* A short ATE sentence shown in list view for significant results */
+.study-ate {
+    font-family: var(--font-sans);
+    font-size: 0.875rem;
+    color: var(--color-text-muted);
+    font-style: italic;
+    margin-top: var(--space-sm);
+}
+
 .study-tier-gold {
     color: var(--color-gold);
     background-color: var(--color-gold-bg);
