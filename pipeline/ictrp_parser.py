@@ -11,7 +11,6 @@ import csv
 from typing import Optional, Dict, List, Any
 from pathlib import Path
 
-from csv_schema import FIELDNAMES, normalize_row
 from scoring import ultra_significance_score, determine_evidence_tier, effect_magnitude, sample_size_descriptor
 from categories import assign_category
 
@@ -282,43 +281,6 @@ def parse_trial(trial_elem: ET.Element) -> Optional[Dict]:
     return trial_data
 
 
-def trial_to_row(trial: Dict) -> Dict:
-    """Convert an ICTRP trial record to a CSV row."""
-    return {
-        "nct_id": trial.get("trial_id", ""),
-        "source": trial.get("source", "ictrp"),
-        "source_url": trial.get("source_url", ""),
-        "category": trial.get("category", "health"),
-        "evidence_tier": trial.get("evidence_tier", "BRONZE"),
-        "title": trial.get("title", ""),
-        "headline": trial.get("headline", ""),
-        "summary": trial.get("summary", ""),
-        "intervention": trial.get("intervention", "")[:200],  # Truncate long interventions
-        "intervention_description": "",
-        "comparator": "",
-        "population": "",
-        "conditions": trial.get("condition", ""),
-        "sample_size": trial.get("sample_size") or 0,
-        "study_enrollment": trial.get("sample_size") or 0,
-        "sample_size_category": sample_size_descriptor(trial.get("sample_size")) if trial.get("sample_size") else "",
-        "num_arms": 2,  # Default
-        "completion_date": trial.get("results_date", ""),
-        "outcome_name": trial.get("primary_outcome", "")[:200],
-        "outcome_type": "PRIMARY",
-        "control_mean": None,
-        "control_sd": None,
-        "control_n": None,
-        "treatment_mean": None,
-        "treatment_sd": None,
-        "treatment_n": None,
-        "ate": None,
-        "effect_size": trial.get("effect_size"),
-        "effect_magnitude": trial.get("effect_magnitude", ""),
-        "p_value": trial.get("p_value"),
-        "ultra_score": trial.get("ultra_score", 0),
-    }
-
-
 def parse_ictrp_xml(xml_path: str, max_trials: int = None) -> List[Dict]:
     """
     Parse the ICTRP XML file and extract relevant trials.
@@ -378,10 +340,52 @@ def export_to_csv(trials: List[Dict], output_path: str) -> int:
         print("No trials to export")
         return 0
     
-    rows = [normalize_row(trial_to_row(t)) for t in trials]
+    # Use same field order as export_csv.py for compatibility
+    fieldnames = [
+        "nct_id", "category", "evidence_tier", "title", "headline", "summary",
+        "intervention", "intervention_description", "comparator", "population",
+        "conditions", "sample_size", "study_enrollment", "sample_size_category",
+        "num_arms", "completion_date", "outcome_name", "outcome_type",
+        "control_mean", "control_sd", "control_n", "treatment_mean", "treatment_sd",
+        "treatment_n", "effect_size", "effect_magnitude", "p_value", "ultra_score"
+    ]
+    
+    rows = []
+    for t in trials:
+        row = {
+            "nct_id": t.get("trial_id", ""),
+            "category": t.get("category", "health"),
+            "evidence_tier": t.get("evidence_tier", "BRONZE"),
+            "title": t.get("title", ""),
+            "headline": t.get("headline", ""),
+            "summary": t.get("summary", ""),
+            "intervention": t.get("intervention", "")[:200],  # Truncate long interventions
+            "intervention_description": "",
+            "comparator": "",
+            "population": "",
+            "conditions": t.get("condition", ""),
+            "sample_size": t.get("sample_size") or 0,
+            "study_enrollment": t.get("sample_size") or 0,
+            "sample_size_category": sample_size_descriptor(t.get("sample_size")) if t.get("sample_size") else "",
+            "num_arms": 2,  # Default
+            "completion_date": t.get("results_date", ""),
+            "outcome_name": t.get("primary_outcome", "")[:200],
+            "outcome_type": "PRIMARY",
+            "control_mean": None,
+            "control_sd": None,
+            "control_n": None,
+            "treatment_mean": None,
+            "treatment_sd": None,
+            "treatment_n": None,
+            "effect_size": t.get("effect_size"),
+            "effect_magnitude": t.get("effect_magnitude", ""),
+            "p_value": t.get("p_value"),
+            "ultra_score": t.get("ultra_score", 0),
+        }
+        rows.append(row)
     
     with open(output_path, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
     

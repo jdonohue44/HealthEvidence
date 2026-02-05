@@ -7,14 +7,8 @@ the frontend display, including plain-language summaries.
 
 import csv
 import os
-import re
 from datetime import datetime
-from pathlib import Path
 from typing import List, Dict, Optional
-
-from csv_schema import FIELDNAMES, calculate_ate, normalize_row
-from ictrp_parser import parse_ictrp_xml, trial_to_row
-from medrxiv_scraper import fetch_and_process
 from results_analysis import run_analysis
 from categories import get_category_display_name
 from scoring import sample_size_descriptor
@@ -155,34 +149,23 @@ def generate_plain_summary(study: Dict, outcome: Dict) -> str:
     return " ".join(sentences)
 
 
-NCT_ID_PATTERN = re.compile(r"^NCT\d{8}$", re.I)
-
-
-def is_valid_nct_id(nct_id: str) -> bool:
-    """Validate NCT identifiers from ClinicalTrials.gov."""
-    return bool(nct_id and NCT_ID_PATTERN.match(nct_id.strip()))
-
-
-def build_rows_from_results(results: List[Dict], min_score: float = 0) -> List[Dict]:
+def export_to_csv(results: List[Dict], output_path: str, min_score: float = 0) -> int:
     """
-    Build CSV rows from ClinicalTrials.gov analysis results.
+    Export analyzed results to CSV.
     
     Args:
         results: List of analyzed study results
+        output_path: Path to output CSV file
         min_score: Minimum ultra-significance score to include (0 = all)
         
     Returns:
-        List of row dictionaries
+        Number of rows exported
     """
     rows = []
     
     for study in results:
         metadata = study["metadata"]
         category = study["category"]
-        nct_id = metadata.get("nct_id", "")
-
-        if not is_valid_nct_id(nct_id):
-            continue
         
         for outcome in study["outcomes"]:
             # Filter by score if specified
@@ -200,13 +183,9 @@ def build_rows_from_results(results: List[Dict], min_score: float = 0) -> List[D
             
             # Get study-level enrollment (may differ from outcome-level sample sizes)
             study_enrollment = metadata.get("enrollment") or total_n
-
-            ate_value = calculate_ate(outcome.get("control_mean"), outcome.get("treatment_mean"))
             
             row = {
-                "nct_id": nct_id,
-                "source": "clinicaltrials.gov",
-                "source_url": f"https://clinicaltrials.gov/study/{nct_id}",
+                "nct_id": metadata.get("nct_id", ""),
                 "category": category,
                 "evidence_tier": outcome.get("evidence_tier", "BRONZE"),
                 "title": metadata.get("title", ""),
@@ -230,7 +209,6 @@ def build_rows_from_results(results: List[Dict], min_score: float = 0) -> List[D
                 "treatment_mean": outcome.get("treatment_mean"),
                 "treatment_sd": outcome.get("treatment_sd"),
                 "treatment_n": outcome.get("treatment_n"),
-                "ate": ate_value,
                 "effect_size": outcome.get("effect_size"),
                 "effect_magnitude": outcome.get("effect_magnitude", ""),
                 "p_value": outcome.get("p_value"),
@@ -239,31 +217,19 @@ def build_rows_from_results(results: List[Dict], min_score: float = 0) -> List[D
             
             rows.append(row)
     
-    return rows
-
-
-def export_rows(rows: List[Dict], output_path: str) -> int:
-    """
-    Export row dictionaries to CSV.
-
-    Args:
-        rows: List of row dictionaries
-        output_path: Path to output CSV file
-
-    Returns:
-        Number of rows exported
-    """
     # Sort by ultra_score descending
-    rows.sort(key=lambda x: x.get("ultra_score", 0) or 0, reverse=True)
+    rows.sort(key=lambda x: x.get("ultra_score", 0), reverse=True)
     
     # Write CSV
     if rows:
+        fieldnames = list(rows[0].keys())
+        
         os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else ".", exist_ok=True)
         
         with open(output_path, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
-            writer.writerows([normalize_row(row) for row in rows])
+            writer.writerows(rows)
         
         print(f"Exported {len(rows)} rows to {output_path}")
     else:
@@ -272,42 +238,13 @@ def export_rows(rows: List[Dict], output_path: str) -> int:
     return len(rows)
 
 
-def export_to_csv(results: List[Dict], output_path: str, min_score: float = 0) -> int:
-    """
-    Export analyzed ClinicalTrials.gov results to CSV.
-
-    Args:
-        results: List of analyzed study results
-        output_path: Path to output CSV file
-        min_score: Minimum ultra-significance score to include (0 = all)
-
-    Returns:
-        Number of rows exported
-    """
-    rows = build_rows_from_results(results, min_score=min_score)
-    return export_rows(rows, output_path)
-
-
-def run_export(
-    output_path: str = "../frontend/data/trials.csv",
-    max_studies: int = 50,
-    max_medrxiv: int = 30,
-    max_ictrp: int = 200,
-    include_medrxiv: bool = True,
-    include_ictrp: bool = True,
-    max_total: Optional[int] = None,
-):
+def run_export(output_path: str = "../frontend/data/trials.csv", max_studies: int = 50):
     """
     Run the full analysis and export pipeline.
     
     Args:
         output_path: Path to output CSV file
         max_studies: Maximum number of studies to analyze
-        max_medrxiv: Maximum medRxiv records to include
-        max_ictrp: Maximum ICTRP trials to parse
-        include_medrxiv: Whether to include medRxiv preprints
-        include_ictrp: Whether to include ICTRP trials
-        max_total: Optional cap on total rows exported
     """
     print("="*60)
     print("ULTRA-SIGNIFICANT TRIALS EXPORT")
@@ -317,40 +254,12 @@ def run_export(
     # Run analysis
     results = run_analysis(max_studies=max_studies)
     
-    rows = build_rows_from_results(results, min_score=0)
-
-    # Pull in medRxiv preprints
-    if include_medrxiv:
-        try:
-            medrxiv_rows = fetch_and_process(max_results=max_medrxiv)
-            rows.extend(medrxiv_rows)
-            print(f"Added {len(medrxiv_rows)} medRxiv records")
-        except Exception as exc:
-            print(f"medRxiv fetch failed: {exc}")
-
-    # Pull in ICTRP registry trials
-    if include_ictrp:
-        xml_path = Path(__file__).parent.parent / "frontend" / "data" / "ICTRP-Results.xml"
-        if xml_path.exists():
-            ictrp_trials = parse_ictrp_xml(str(xml_path), max_trials=max_ictrp)
-            ictrp_rows = [trial_to_row(t) for t in ictrp_trials]
-            rows.extend(ictrp_rows)
-            print(f"Added {len(ictrp_rows)} ICTRP trials")
-        else:
-            print(f"ICTRP XML file not found at {xml_path}")
-
-    # Sort once for both exports
-    rows.sort(key=lambda x: x.get("ultra_score", 0) or 0, reverse=True)
-    if max_total:
-        rows = rows[:max_total]
-
     # Export all results (including non-ultra-significant for completeness)
-    total_exported = export_rows(rows, output_path)
-
+    total_exported = export_to_csv(results, output_path, min_score=0)
+    
     # Also export just the ultra-significant ones
-    ultra_rows = [r for r in rows if (r.get("ultra_score") or 0) >= 0.1]
     ultra_path = output_path.replace(".csv", "_ultra.csv")
-    ultra_exported = export_rows(ultra_rows, ultra_path)
+    ultra_exported = export_to_csv(results, ultra_path, min_score=0.1)
     
     print("\n" + "="*60)
     print("EXPORT COMPLETE")
