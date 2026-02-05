@@ -4,7 +4,9 @@
 
 - incorporate MedRxiv (https://www.medrxiv.org/) "the preprint server for health sciences" studies as a source of research studies. See my sample script to get started @medrxiv_scraper.py
 - incorporate International Clinical Trials Registry Platform (ICTRP) data using my bulk downloaded xml file @ICTRP-Results.xml
-- incorporate PubMed studies
+
+- investigate if PubMed should be incorporated
+- ingestigate if https://healthevidence.org/ can be helpful, or if some differentiation is needed between platforms
 
 ### frontend
 - show the ATE when available
