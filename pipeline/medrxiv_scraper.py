@@ -13,6 +13,7 @@ import csv
 import datetime as dt
 from typing import Optional, Dict, List, Any
 
+from csv_schema import FIELDNAMES, normalize_row
 from scoring import ultra_significance_score, determine_evidence_tier, effect_magnitude, sample_size_descriptor
 from categories import assign_category
 
@@ -49,7 +50,7 @@ TOPIC_TERMS = [
 TOPIC_PATTERN = re.compile("|".join(re.escape(t) for t in TOPIC_TERMS), re.I)
 
 
-def fetch_interval(start: str, end: str, server: str = "medrxiv") -> List[Dict]:
+def fetch_interval(start: str, end: str, server: str = "medrxiv", max_records: Optional[int] = None) -> List[Dict]:
     """
     Fetch preprints from medRxiv API within a date range.
     
@@ -76,6 +77,8 @@ def fetch_interval(start: str, end: str, server: str = "medrxiv") -> List[Dict]:
             results.extend(batch)
             cursor += 100
             print(f"  Fetched {len(results)} records...")
+            if max_records and len(results) >= max_records:
+                break
         except requests.RequestException as e:
             print(f"Error fetching from medRxiv: {e}")
             break
@@ -264,8 +267,10 @@ def process_medrxiv_record(record: Dict) -> Optional[Dict]:
     headline = generate_headline(record)
     summary = generate_summary(record, stats)
     
+    study_id = f"medrxiv-{record.get('doi', '').replace('/', '-')}"
+
     return {
-        "study_id": f"medrxiv-{record.get('doi', '').replace('/', '-')}",
+        "nct_id": study_id,
         "source": "medrxiv",
         "source_url": f"https://doi.org/{record.get('doi', '')}",
         "category": category,
@@ -291,6 +296,7 @@ def process_medrxiv_record(record: Dict) -> Optional[Dict]:
         "treatment_mean": None,
         "treatment_sd": None,
         "treatment_n": None,
+        "ate": None,
         "effect_size": best_effect,
         "effect_magnitude": effect_magnitude(best_effect) if best_effect else "",
         "p_value": best_p,
@@ -317,17 +323,38 @@ def fetch_and_process(start_date: str = None, end_date: str = None, max_results:
         end_date = dt.date.today().isoformat()
     
     print(f"Fetching medRxiv preprints from {start_date} to {end_date}...")
-    raw_records = fetch_interval(start_date, end_date)
-    print(f"Found {len(raw_records)} total records")
-    
     print("Processing records...")
     processed = []
-    for record in raw_records:
-        result = process_medrxiv_record(record)
-        if result:
-            processed.append(result)
-            if len(processed) >= max_results:
-                break
+    cursor = 0
+    fetched = 0
+
+    while True:
+        url = f"https://api.medrxiv.org/details/medrxiv/{start_date}/{end_date}/{cursor}/json"
+        try:
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+            batch = response.json().get("collection", [])
+        except requests.RequestException as e:
+            print(f"Error fetching from medRxiv: {e}")
+            break
+
+        if not batch:
+            break
+
+        fetched += len(batch)
+        print(f"  Fetched {fetched} records...")
+
+        for record in batch:
+            result = process_medrxiv_record(record)
+            if result:
+                processed.append(result)
+                if len(processed) >= max_results:
+                    break
+
+        if len(processed) >= max_results:
+            break
+
+        cursor += 100
     
     # Sort by ultra_score descending
     processed.sort(key=lambda x: x.get("ultra_score", 0), reverse=True)
@@ -351,25 +378,10 @@ def export_to_csv(results: List[Dict], output_path: str) -> int:
         print("No results to export")
         return 0
     
-    # Use same field order as export_csv.py
-    fieldnames = [
-        "nct_id", "category", "evidence_tier", "title", "headline", "summary",
-        "intervention", "intervention_description", "comparator", "population",
-        "conditions", "sample_size", "study_enrollment", "sample_size_category",
-        "num_arms", "completion_date", "outcome_name", "outcome_type",
-        "control_mean", "control_sd", "control_n", "treatment_mean", "treatment_sd",
-        "treatment_n", "effect_size", "effect_magnitude", "p_value", "ultra_score"
-    ]
-    
-    # Map study_id to nct_id field for compatibility
-    rows = []
-    for r in results:
-        row = {k: r.get(k, "") for k in fieldnames}
-        row["nct_id"] = r.get("study_id", "")
-        rows.append(row)
+    rows = [normalize_row(r) for r in results]
     
     with open(output_path, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
         writer.writeheader()
         writer.writerows(rows)
     

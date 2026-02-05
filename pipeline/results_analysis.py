@@ -589,7 +589,11 @@ def run_analysis(max_studies: int = 50) -> List[Dict]:
         if analyzed >= max_studies:
             break
         
-        nct_id = study.get("protocolSection", {}).get("identificationModule", {}).get("nctId")
+        nct_id = (
+            study.get("protocolSection", {}).get("identificationModule", {}).get("nctId")
+            or study.get("nctId")
+            or study.get("NCTId")
+        )
         if not nct_id:
             continue
         

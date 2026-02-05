@@ -1,3 +1,5 @@
 frontend/.DS_Store
 .DS_Store
 .env
+__pycache__/
+*.pyc
