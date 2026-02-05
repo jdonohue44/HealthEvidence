@@ -13,6 +13,7 @@ import csv
 import datetime as dt
 from typing import Optional, Dict, List, Any
 
+from csv_schema import FIELDNAMES, normalize_row
 from scoring import ultra_significance_score, determine_evidence_tier, effect_magnitude, sample_size_descriptor
 from categories import assign_category
 
@@ -264,8 +265,10 @@ def process_medrxiv_record(record: Dict) -> Optional[Dict]:
     headline = generate_headline(record)
     summary = generate_summary(record, stats)
     
+    study_id = f"medrxiv-{record.get('doi', '').replace('/', '-')}"
+
     return {
-        "study_id": f"medrxiv-{record.get('doi', '').replace('/', '-')}",
+        "nct_id": study_id,
         "source": "medrxiv",
         "source_url": f"https://doi.org/{record.get('doi', '')}",
         "category": category,
@@ -291,6 +294,7 @@ def process_medrxiv_record(record: Dict) -> Optional[Dict]:
         "treatment_mean": None,
         "treatment_sd": None,
         "treatment_n": None,
+        "ate": None,
         "effect_size": best_effect,
         "effect_magnitude": effect_magnitude(best_effect) if best_effect else "",
         "p_value": best_p,
@@ -351,25 +355,10 @@ def export_to_csv(results: List[Dict], output_path: str) -> int:
         print("No results to export")
         return 0
     
-    # Use same field order as export_csv.py
-    fieldnames = [
-        "nct_id", "category", "evidence_tier", "title", "headline", "summary",
-        "intervention", "intervention_description", "comparator", "population",
-        "conditions", "sample_size", "study_enrollment", "sample_size_category",
-        "num_arms", "completion_date", "outcome_name", "outcome_type",
-        "control_mean", "control_sd", "control_n", "treatment_mean", "treatment_sd",
-        "treatment_n", "effect_size", "effect_magnitude", "p_value", "ultra_score"
-    ]
-    
-    # Map study_id to nct_id field for compatibility
-    rows = []
-    for r in results:
-        row = {k: r.get(k, "") for k in fieldnames}
-        row["nct_id"] = r.get("study_id", "")
-        rows.append(row)
+    rows = [normalize_row(r) for r in results]
     
     with open(output_path, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
         writer.writeheader()
         writer.writerows(rows)
     

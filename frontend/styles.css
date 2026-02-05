@@ -418,6 +418,11 @@ a:hover {
     background-color: var(--color-bg-secondary);
 }
 
+.study-tier-bronze {
+    color: var(--color-text-secondary);
+    background-color: var(--color-border-light);
+}
+
 .study-tier-weak {
     color: var(--color-weak);
     background-color: var(--color-weak-bg);

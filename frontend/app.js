@@ -31,6 +31,54 @@ function detectRandomized(text) {
     return RANDOMIZED_PATTERN.test(text || '');
 }
 
+function parseNumber(value) {
+    const num = parseFloat(value);
+    return Number.isFinite(num) ? num : null;
+}
+
+function parseInteger(value) {
+    const num = parseInt(value, 10);
+    return Number.isFinite(num) ? num : null;
+}
+
+function computeAte(controlMean, treatmentMean) {
+    if (!Number.isFinite(controlMean) || !Number.isFinite(treatmentMean)) {
+        return null;
+    }
+    return treatmentMean - controlMean;
+}
+
+function formatAte(ate) {
+    if (!Number.isFinite(ate)) return 'N/A';
+    const sign = ate > 0 ? '+' : '';
+    return `${sign}${ate.toFixed(2)}`;
+}
+
+function formatSourceName(source) {
+    const normalized = (source || '').toLowerCase();
+    if (normalized === 'medrxiv') return 'medRxiv';
+    if (normalized === 'ictrp') return 'WHO ICTRP';
+    if (normalized === 'clinicaltrials.gov' || normalized === 'clinicaltrials') return 'ClinicalTrials.gov';
+    return source || 'Study source';
+}
+
+function getEvidenceTierConfig(tier) {
+    const normalized = (tier || '').toUpperCase();
+    if (normalized === 'GOLD') {
+        return { label: 'Strong evidence', className: 'study-tier-gold' };
+    }
+    if (normalized === 'SILVER') {
+        return { label: 'Good evidence', className: 'study-tier-silver' };
+    }
+    if (normalized === 'BRONZE') {
+        return { label: 'Limited evidence', className: 'study-tier-bronze' };
+    }
+    if (normalized === 'WEAK') {
+        return { label: 'Weak evidence', className: 'study-tier-weak' };
+    }
+    return { label: 'Evidence', className: 'study-tier-silver' };
+}
+
 /**
  * Determine verdict based on evidence tier and effect direction
  * Returns object with verdict text and confidence level
@@ -154,13 +202,24 @@ function processGoldStandardData(data) {
         .map(row => {
             const metaSource = `${row.title || ''} ${row.headline || ''} ${row.summary || ''}`;
             const isMetaAnalysis = detectMetaAnalysis(metaSource);
-            const isRandomized = !isMetaAnalysis;
+            const evidenceTier = (row.evidence_tier || 'GOLD').toUpperCase();
+            const isRandomized = !isMetaAnalysis && (['GOLD', 'SILVER'].includes(evidenceTier) || detectRandomized(metaSource));
+
+            const controlMean = parseNumber(row.control_mean);
+            const treatmentMean = parseNumber(row.treatment_mean);
+            const ateValue = parseNumber(row.ate);
+            const computedAte = ateValue !== null ? ateValue : computeAte(controlMean, treatmentMean);
+            const sampleSize = parseInteger(row.sample_size) ?? 0;
+            const studyEnrollment = parseInteger(row.study_enrollment) ?? sampleSize;
+            const numArms = parseInteger(row.num_arms) ?? 2;
+            const source = (row.source || 'clinicaltrials.gov').toLowerCase();
+            const sourceUrl = row.source_url || (row.nct_id ? `https://clinicaltrials.gov/study/${row.nct_id}` : '');
 
             return ({
             id: row.nct_id,
             type: 'gold',
             category: (row.category || 'health').toLowerCase(),
-            evidenceTier: row.evidence_tier || 'GOLD',
+            evidenceTier,
             title: row.title || '',
             headline: row.headline || '',
             summary: row.summary || '',
@@ -169,20 +228,22 @@ function processGoldStandardData(data) {
             comparator: row.comparator || '',
             population: row.population || '',
             conditions: row.conditions || '',
-            sampleSize: parseInt(row.sample_size) || 0,
-            studyEnrollment: parseInt(row.study_enrollment) || parseInt(row.sample_size) || 0,
+            sampleSize,
+            studyEnrollment,
             sampleSizeCategory: row.sample_size_category || '',
-            numArms: parseInt(row.num_arms) || 2,
+            numArms,
             completionDate: row.completion_date || '',
             outcomeName: row.outcome_name || '',
             outcomeType: row.outcome_type || '',
-            controlMean: parseFloat(row.control_mean) || null,
-            treatmentMean: parseFloat(row.treatment_mean) || null,
-            effectSize: parseFloat(row.effect_size) || null,
+            controlMean,
+            treatmentMean,
+            ate: computedAte,
+            effectSize: parseNumber(row.effect_size),
             effectMagnitude: row.effect_magnitude || '',
-            pValue: parseFloat(row.p_value) || null,
-            ultraScore: parseFloat(row.ultra_score) || 0,
-                sourceUrl: `https://clinicaltrials.gov/study/${row.nct_id}`,
+            pValue: parseNumber(row.p_value),
+            ultraScore: parseNumber(row.ultra_score) || 0,
+                source,
+                sourceUrl,
                 isRandomized,
                 isMetaAnalysis
             });
@@ -211,7 +272,7 @@ function processWeakEvidenceData(data) {
             actualFinding: row.actual_finding || '',
             summary: row.summary || '',
             studyType: row.study_type || 'Observational',
-            sampleSize: parseInt(row.sample_size) || 0,
+            sampleSize: parseInteger(row.sample_size) || 0,
             whyWeak: row.why_weak || '',
             confounders: row.confounders || '',
             sourceUrl: row.source_url || '',
@@ -568,8 +629,9 @@ function renderMethodTags(study, classPrefix = 'study') {
  * Render a gold standard study article
  */
 function renderGoldStudyArticle(study) {
-    const tierClass = study.evidenceTier === 'GOLD' ? 'study-tier-gold' : 'study-tier-silver';
-    const tierLabel = 'Strong Evidence';
+    const tierConfig = getEvidenceTierConfig(study.evidenceTier);
+    const tierClass = tierConfig.className;
+    const tierLabel = tierConfig.label;
     
     const meta = [];
     if (study.sampleSize > 0) {
@@ -585,8 +647,14 @@ function renderGoldStudyArticle(study) {
                            Math.abs(study.effectSize) >= 0.5 ? 'medium effect' : 'small effect';
         meta.push(effectLabel);
     }
+    if (study.ate !== null && study.ate !== undefined && !isNaN(study.ate)) {
+        meta.push(`ATE ${formatAte(study.ate)}`);
+    }
     if (study.completionDate) {
         meta.push(formatDate(study.completionDate));
+    }
+    if (study.source) {
+        meta.push(formatSourceName(study.source));
     }
     
     const simpleHeadline = generateSimpleHeadline(study);
@@ -686,10 +754,40 @@ function closeModal() {
  * Render gold standard study modal content
  */
 function renderGoldStudyModal(study) {
-    const tierClass = study.evidenceTier === 'GOLD' ? 'study-tier-gold' : 'study-tier-silver';
-    const tierLabel = 'Strong Evidence';
+    const tierConfig = getEvidenceTierConfig(study.evidenceTier);
+    const tierClass = tierConfig.className;
+    const tierLabel = tierConfig.label;
     const simpleHeadline = generateSimpleHeadline(study);
     const methodTags = renderMethodTags(study, 'modal');
+    const sourceLabel = formatSourceName(study.source);
+    const sourceLinkLabel = sourceLabel ? `View on ${sourceLabel}` : 'View study source';
+    const flukeLabel = study.pValue && study.pValue < 0.001 ? 'Very low' :
+        study.pValue && study.pValue < 0.01 ? 'Low' :
+        study.pValue ? 'Moderate' : 'N/A';
+    const stats = [
+        {
+            value: study.sampleSize > 0 ? study.sampleSize.toLocaleString() : 'N/A',
+            label: 'People tested'
+        },
+        {
+            value: study.effectMagnitude || (study.effectSize ? (Math.abs(study.effectSize) >= 0.8 ? 'Large' : Math.abs(study.effectSize) >= 0.5 ? 'Medium' : 'Small') : 'N/A'),
+            label: 'How big the effect was'
+        },
+        {
+            value: flukeLabel,
+            label: 'Chance of being a fluke'
+        },
+        {
+            value: study.numArms || 2,
+            label: 'Groups compared'
+        }
+    ];
+    if (study.ate !== null && study.ate !== undefined && !isNaN(study.ate)) {
+        stats.push({
+            value: formatAte(study.ate),
+            label: 'Avg treatment effect'
+        });
+    }
     
     return `
         <header class="modal-header">
@@ -707,22 +805,12 @@ function renderGoldStudyModal(study) {
         </div>
         
         <div class="modal-stats">
-            <div class="modal-stat">
-                <div class="modal-stat-value">${study.sampleSize > 0 ? study.sampleSize.toLocaleString() : 'N/A'}</div>
-                <div class="modal-stat-label">People tested</div>
-            </div>
-            <div class="modal-stat">
-                <div class="modal-stat-value">${study.effectMagnitude || (study.effectSize ? (Math.abs(study.effectSize) >= 0.8 ? 'Large' : Math.abs(study.effectSize) >= 0.5 ? 'Medium' : 'Small') : 'N/A')}</div>
-                <div class="modal-stat-label">How big the effect was</div>
-            </div>
-            <div class="modal-stat">
-                <div class="modal-stat-value">${study.pValue && study.pValue < 0.001 ? 'Very low' : study.pValue && study.pValue < 0.01 ? 'Low' : 'Moderate'}</div>
-                <div class="modal-stat-label">Chance of being a fluke</div>
-            </div>
-            <div class="modal-stat">
-                <div class="modal-stat-value">${study.numArms || 2}</div>
-                <div class="modal-stat-label">Groups compared</div>
-            </div>
+            ${stats.map(stat => `
+                <div class="modal-stat">
+                    <div class="modal-stat-value">${stat.value}</div>
+                    <div class="modal-stat-label">${stat.label}</div>
+                </div>
+            `).join('')}
         </div>
         
         ${study.intervention ? `
@@ -746,14 +834,16 @@ function renderGoldStudyModal(study) {
         </div>
         ` : ''}
         
+        ${study.sourceUrl ? `
         <div class="modal-source modal-section">
             <h2 class="modal-section-title">Source</h2>
             <p class="modal-section-content">
                 <a href="${escapeHtml(study.sourceUrl)}" target="_blank" rel="noopener">
-                    View on ClinicalTrials.gov
+                    ${escapeHtml(sourceLinkLabel)}
                 </a>
             </p>
         </div>
+        ` : ''}
     `;
 }
 
