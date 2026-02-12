@@ -1,7 +1,3 @@
-/**
- * Ultra-Significant Trials
- * Frontend application for displaying and filtering clinical trial data
- */
 
 // State
 let goldStandardStudies = [];
@@ -102,7 +98,7 @@ async function init() {
     try {
         // Load both data sources in parallel
         const [goldData, weakData] = await Promise.all([
-            loadCSV('data/trials.csv'),
+            loadCSV('data/clinical_trials.csv'),
             loadCSV('data/weak_evidence.csv')
         ]);
         
@@ -146,34 +142,19 @@ function loadCSV(path) {
 }
 
 /**
- * Process gold standard trial data
+ * Process gold standard trial data: one study per nct_id, with all outcomes aggregated
  */
 function processGoldStandardData(data) {
-    return data
-        .filter(row => row.nct_id && row.headline)
-        .map(row => {
-            const metaSource = `${row.title || ''} ${row.headline || ''} ${row.summary || ''}`;
-            const isMetaAnalysis = detectMetaAnalysis(metaSource);
-            const isRandomized = !isMetaAnalysis;
-
-            return ({
-            id: row.nct_id,
-            type: 'gold',
-            category: (row.category || 'health').toLowerCase(),
-            evidenceTier: row.evidence_tier || 'GOLD',
-            title: row.title || '',
+    const rows = data.filter(row => row.nct_id && row.headline);
+    const byNct = {};
+    const tierRank = { GOLD: 3, SILVER: 2, BRONZE: 1 };
+    rows.forEach(row => {
+        const metaSource = `${row.title || ''} ${row.headline || ''} ${row.summary || ''}`;
+        const isMetaAnalysis = detectMetaAnalysis(metaSource);
+        const isRandomized = !isMetaAnalysis;
+        const outcome = {
             headline: row.headline || '',
             summary: row.summary || '',
-            intervention: row.intervention || '',
-            interventionDescription: row.intervention_description || '',
-            comparator: row.comparator || '',
-            population: row.population || '',
-            conditions: row.conditions || '',
-            sampleSize: parseInt(row.sample_size) || 0,
-            studyEnrollment: parseInt(row.study_enrollment) || parseInt(row.sample_size) || 0,
-            sampleSizeCategory: row.sample_size_category || '',
-            numArms: parseInt(row.num_arms) || 2,
-            completionDate: row.completion_date || '',
             outcomeName: row.outcome_name || '',
             outcomeType: row.outcome_type || '',
             controlMean: parseFloat(row.control_mean) || null,
@@ -182,12 +163,54 @@ function processGoldStandardData(data) {
             effectMagnitude: row.effect_magnitude || '',
             pValue: parseFloat(row.p_value) || null,
             ultraScore: parseFloat(row.ultra_score) || 0,
-                sourceUrl: `https://clinicaltrials.gov/study/${row.nct_id}`,
+            analysisParamType: row.analysis_param_type || '',
+            analysisParamValue: row.analysis_param_value || ''
+        };
+        const nct = row.nct_id;
+        if (!byNct[nct]) {
+            byNct[nct] = {
+                id: nct,
+                type: 'gold',
+                category: (row.category || 'health').toLowerCase(),
+                evidenceTier: row.evidence_tier || 'GOLD',
+                title: row.title || '',
+                intervention: row.intervention || '',
+                interventionDescription: row.intervention_description || '',
+                comparator: row.comparator || '',
+                population: row.population || '',
+                conditions: row.conditions || '',
+                sampleSize: parseInt(row.sample_size) || 0,
+                studyEnrollment: parseInt(row.study_enrollment) || parseInt(row.sample_size) || 0,
+                sampleSizeCategory: row.sample_size_category || '',
+                numArms: parseInt(row.num_arms) || 2,
+                completionDate: row.completion_date || '',
+                sourceUrl: `https://clinicaltrials.gov/study/${nct}`,
                 isRandomized,
-                isMetaAnalysis
-            });
-        })
-        .sort((a, b) => b.ultraScore - a.ultraScore);
+                isMetaAnalysis,
+                outcomes: []
+            };
+        }
+        byNct[nct].sampleSize = Math.max(byNct[nct].sampleSize, parseInt(row.sample_size) || 0);
+        byNct[nct].outcomes.push(outcome);
+        const r = tierRank[row.evidence_tier] || 0;
+        if (r > (tierRank[byNct[nct].evidenceTier] || 0)) byNct[nct].evidenceTier = row.evidence_tier;
+    });
+    return Object.values(byNct).map(study => {
+        study.outcomes.sort((a, b) => b.ultraScore - a.ultraScore);
+        const primary = study.outcomes[0];
+        study.headline = primary.headline;
+        study.summary = primary.summary;
+        study.outcomeName = primary.outcomeName;
+        study.outcomeType = primary.outcomeType;
+        study.controlMean = primary.controlMean;
+        study.treatmentMean = primary.treatmentMean;
+        study.effectSize = primary.effectSize;
+        study.effectMagnitude = primary.effectMagnitude;
+        study.pValue = primary.pValue;
+        study.ultraScore = primary.ultraScore;
+        if (study.sampleSize === 0) study.sampleSize = study.studyEnrollment;
+        return study;
+    }).sort((a, b) => b.ultraScore - a.ultraScore);
 }
 
 /**
@@ -595,7 +618,16 @@ function renderGoldStudyArticle(study) {
     const methodTags = renderMethodTags(study);
     const verdict = determineVerdict(study);
     const ateText = formatATE(study);
-    
+    const otherOutcomes = (study.outcomes && study.outcomes.length > 1) ? study.outcomes.slice(1) : [];
+    const otherFindingsHtml = otherOutcomes.length ? `
+            <div class="study-other-outcomes">
+                <span class="study-other-outcomes-label">Also in this trial:</span>
+                <ul class="study-other-outcomes-list">
+                    ${otherOutcomes.map(o => `<li>${highlightText(truncateSummary(o.headline, 120), searchQuery)}</li>`).join('')}
+                </ul>
+            </div>
+    ` : '';
+
     return `
         <article class="study-article" data-study-id="${escapeHtml(study.id)}" data-study-type="gold" tabindex="0" role="button">
             <header class="study-header">
@@ -613,6 +645,7 @@ function renderGoldStudyArticle(study) {
             ${hasFullTitle ? `<p class="study-formal-title">${highlightText(study.title, searchQuery)}</p>` : ''}
             <p class="study-summary">${highlightText(truncateSummary(study.summary), searchQuery)}</p>
             ${ateText ? `<p class="study-ate">${escapeHtml(ateText)}</p>` : ''}
+            ${otherFindingsHtml}
             <footer class="study-meta">
                 ${meta.map(m => escapeHtml(m)).join('<span class="study-meta-divider">·</span>')}
             </footer>
@@ -686,41 +719,51 @@ function closeModal() {
 }
 
 /**
- * Render gold standard study modal content
+ * Render gold standard study modal content (one trial, all outcomes in same style)
  */
 function renderGoldStudyModal(study) {
     const tierClass = study.evidenceTier === 'GOLD' ? 'study-tier-gold' : 'study-tier-silver';
     const tierLabel = 'Strong Evidence';
     const simpleHeadline = generateSimpleHeadline(study);
     const methodTags = renderMethodTags(study, 'modal');
-    
+    const outcomes = study.outcomes && study.outcomes.length ? study.outcomes : [{ headline: study.headline, summary: study.summary, outcomeName: study.outcomeName, outcomeType: study.outcomeType, controlMean: study.controlMean, treatmentMean: study.treatmentMean, effectSize: study.effectSize, effectMagnitude: study.effectMagnitude, pValue: study.pValue, analysisParamType: study.analysisParamType, analysisParamValue: study.analysisParamValue }];
+
+    function formatOutcomeStats(o) {
+        const parts = [];
+        if (o.pValue != null && !isNaN(o.pValue)) parts.push(`p ${o.pValue < 0.001 ? '<0.001' : o.pValue.toFixed(3)}`);
+        if (o.analysisParamType && o.analysisParamValue) parts.push(`${o.analysisParamType}: ${o.analysisParamValue}`);
+        if (o.effectMagnitude) parts.push(o.effectMagnitude + ' effect');
+        if (o.effectSize != null && !isNaN(o.effectSize)) parts.push(`d = ${o.effectSize.toFixed(2)}`);
+        return parts.length ? parts.join(' · ') : '';
+    }
+
+    const outcomesHtml = outcomes.map((o, i) => {
+        const ateText = formatATE(o);
+        return `
+        <div class="modal-outcome">
+            <h3 class="modal-outcome-headline">${highlightText(o.headline, searchQuery)}</h3>
+            <p class="modal-outcome-summary">${highlightText(o.summary, searchQuery)}</p>
+            ${o.outcomeName ? `<p class="modal-outcome-name">${escapeHtml(o.outcomeName)}</p>` : ''}
+            ${ateText ? `<p class="modal-outcome-ate">${escapeHtml(ateText)}</p>` : ''}
+            ${formatOutcomeStats(o) ? `<p class="modal-outcome-stats">${escapeHtml(formatOutcomeStats(o))}</p>` : ''}
+        </div>
+    `;
+    }).join('');
+
     return `
         <header class="modal-header">
             <p class="modal-category">${escapeHtml(study.category)}</p>
-            <h1 class="modal-title" id="modal-title">${highlightText(simpleHeadline, searchQuery)}</h1>
-            ${study.title && study.title !== simpleHeadline ? `<p class="modal-formal-title">${highlightText(study.title, searchQuery)}</p>` : ''}
+            <h1 class="modal-title" id="modal-title">${highlightText(study.title || simpleHeadline, searchQuery)}</h1>
             <div class="modal-badges">
                 <span class="modal-tier ${tierClass}">${tierLabel}</span>
                 ${methodTags}
             </div>
         </header>
         
-        <div class="modal-summary">
-            <p>${highlightText(study.summary, searchQuery)}</p>
-        </div>
-        
         <div class="modal-stats">
             <div class="modal-stat">
                 <div class="modal-stat-value">${study.sampleSize > 0 ? study.sampleSize.toLocaleString() : 'N/A'}</div>
                 <div class="modal-stat-label">People tested</div>
-            </div>
-            <div class="modal-stat">
-                <div class="modal-stat-value">${study.effectMagnitude || (study.effectSize ? (Math.abs(study.effectSize) >= 0.8 ? 'Large' : Math.abs(study.effectSize) >= 0.5 ? 'Medium' : 'Small') : 'N/A')}</div>
-                <div class="modal-stat-label">How big the effect was</div>
-            </div>
-            <div class="modal-stat">
-                <div class="modal-stat-value">${study.pValue && study.pValue < 0.001 ? 'Very low' : study.pValue && study.pValue < 0.01 ? 'Low' : 'Moderate'}</div>
-                <div class="modal-stat-label">Chance of being a fluke</div>
             </div>
             <div class="modal-stat">
                 <div class="modal-stat-value">${study.numArms || 2}</div>
@@ -742,19 +785,10 @@ function renderGoldStudyModal(study) {
         </div>
         ` : ''}
         
-        ${study.outcomeName ? `
         <div class="modal-section">
-            <h2 class="modal-section-title">Outcome Measured</h2>
-            <p class="modal-section-content">${highlightText(study.outcomeName, searchQuery)}</p>
+            <h2 class="modal-section-title">${outcomes.length > 1 ? 'Findings' : 'Finding'}</h2>
+            <div class="modal-outcomes">${outcomesHtml}</div>
         </div>
-        ` : ''}
-
-        ${formatATE(study) ? `
-        <div class="modal-section">
-            <h2 class="modal-section-title">Average treatment effect</h2>
-            <p class="modal-section-content">${escapeHtml(formatATE(study))}</p>
-        </div>
-        ` : ''}
         
         <div class="modal-source modal-section">
             <h2 class="modal-section-title">Source</h2>
