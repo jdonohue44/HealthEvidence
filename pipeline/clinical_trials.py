@@ -134,8 +134,10 @@ def metadata(d: Dict) -> Dict:
     elif ma: pop_parts.append(f"ages up to {ma}")
     if conds: pop_parts.append(f"with {', '.join(conds[:2])}")
     pop = ", ".join(pop_parts) if pop_parts else "adults"
+    nct_id = idm.get("nctId", "")
     return {
-        "nct_id": idm.get("nctId", ""),
+        "study_id": nct_id,
+        "source_url": f"https://clinicaltrials.gov/study/{nct_id}" if nct_id else "",
         "title": idm.get("briefTitle", ""),
         "intervention_names": ", ".join(i.get("name", "") for i in ints),
         "intervention_description": "; ".join(i.get("description", "") for i in ints if i.get("description")),
@@ -143,7 +145,7 @@ def metadata(d: Dict) -> Dict:
         "population": pop,
         "enrollment": safe_float(enr.get("count")),
         "num_arms": len(arms.get("armGroups", [])),
-        "completion_date": comp.get("date", ""),
+        "date_published": comp.get("date", ""),
     }
 
 def outcomes(d: Dict) -> List[Dict]:
@@ -263,12 +265,12 @@ def run():
         tot = (o.get("control_n") or 0) + (o.get("treatment_n") or 0)
         enr = meta.get("enrollment") or tot
         rows.append({
-            "nct_id": meta["nct_id"], "category": cat, "evidence_tier": o.get("evidence_tier", "BRONZE"),
+            "study_id": meta["study_id"], "source_url": meta["source_url"], "category": cat, "evidence_tier": o.get("evidence_tier", "BRONZE"),
             "title": meta["title"], "headline": headline(meta, o), "summary": summary(meta, o),
             "intervention": meta.get("intervention_names", ""), "intervention_description": meta.get("intervention_description", ""),
             "comparator": o.get("control_group", ""), "population": meta.get("population", ""), "conditions": meta.get("conditions", ""),
             "sample_size": tot, "study_enrollment": int(enr) if enr else tot, "sample_size_category": sample_size_desc(tot),
-            "num_arms": meta.get("num_arms", 2), "completion_date": meta.get("completion_date", ""),
+            "num_arms": meta.get("num_arms", 2), "date_published": meta.get("date_published", ""),
             "outcome_name": o.get("outcome_name", ""), "outcome_type": o.get("outcome_type", ""),
             "outcome_param_type": o.get("outcome_param_type", ""), "analysis_param_type": o.get("analysis_param_type", ""), "analysis_param_value": o.get("analysis_param_value", ""),
             "control_mean": o.get("control_mean"), "control_sd": o.get("control_sd"), "control_n": o.get("control_n"),

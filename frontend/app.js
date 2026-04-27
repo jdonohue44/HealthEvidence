@@ -145,10 +145,11 @@ function loadCSV(path) {
  * Process gold standard trial data: one study per nct_id, with all outcomes aggregated
  */
 function processGoldStandardData(data) {
-    const rows = data.filter(row => row.nct_id && row.headline);
-    const byNct = {};
+    const rows = data.filter(row => (row.study_id || row.nct_id) && row.headline);
+    const byStudy = {};
     const tierRank = { GOLD: 3, SILVER: 2, BRONZE: 1 };
     rows.forEach(row => {
+        const studyId = row.study_id || row.nct_id;
         const metaSource = `${row.title || ''} ${row.headline || ''} ${row.summary || ''}`;
         const isMetaAnalysis = detectMetaAnalysis(metaSource);
         const isRandomized = !isMetaAnalysis;
@@ -166,10 +167,9 @@ function processGoldStandardData(data) {
             analysisParamType: row.analysis_param_type || '',
             analysisParamValue: row.analysis_param_value || ''
         };
-        const nct = row.nct_id;
-        if (!byNct[nct]) {
-            byNct[nct] = {
-                id: nct,
+        if (!byStudy[studyId]) {
+            byStudy[studyId] = {
+                id: studyId,
                 type: 'gold',
                 category: (row.category || 'health').toLowerCase(),
                 evidenceTier: row.evidence_tier || 'GOLD',
@@ -183,19 +183,19 @@ function processGoldStandardData(data) {
                 studyEnrollment: parseInt(row.study_enrollment) || parseInt(row.sample_size) || 0,
                 sampleSizeCategory: row.sample_size_category || '',
                 numArms: parseInt(row.num_arms) || 2,
-                completionDate: row.completion_date || '',
-                sourceUrl: `https://clinicaltrials.gov/study/${nct}`,
+                datePublished: row.date_published || row.completion_date || '',
+                sourceUrl: row.source_url || (studyId.startsWith('NCT') ? `https://clinicaltrials.gov/study/${studyId}` : ''),
                 isRandomized,
                 isMetaAnalysis,
                 outcomes: []
             };
         }
-        byNct[nct].sampleSize = Math.max(byNct[nct].sampleSize, parseInt(row.sample_size) || 0);
-        byNct[nct].outcomes.push(outcome);
+        byStudy[studyId].sampleSize = Math.max(byStudy[studyId].sampleSize, parseInt(row.sample_size) || 0);
+        byStudy[studyId].outcomes.push(outcome);
         const r = tierRank[row.evidence_tier] || 0;
-        if (r > (tierRank[byNct[nct].evidenceTier] || 0)) byNct[nct].evidenceTier = row.evidence_tier;
+        if (r > (tierRank[byStudy[studyId].evidenceTier] || 0)) byStudy[studyId].evidenceTier = row.evidence_tier;
     });
-    return Object.values(byNct).map(study => {
+    return Object.values(byStudy).map(study => {
         study.outcomes.sort((a, b) => b.ultraScore - a.ultraScore);
         const primary = study.outcomes[0];
         study.headline = primary.headline;
@@ -609,8 +609,8 @@ function renderGoldStudyArticle(study) {
                            Math.abs(study.effectSize) >= 0.5 ? 'medium effect' : 'small effect';
         meta.push(effectLabel);
     }
-    if (study.completionDate) {
-        meta.push(formatDate(study.completionDate));
+    if (study.datePublished) {
+        meta.push(formatDate(study.datePublished));
     }
     
     const simpleHeadline = generateSimpleHeadline(study);
@@ -794,7 +794,7 @@ function renderGoldStudyModal(study) {
             <h2 class="modal-section-title">Source</h2>
             <p class="modal-section-content">
                 <a href="${escapeHtml(study.sourceUrl)}" target="_blank" rel="noopener">
-                    View on ClinicalTrials.gov
+                    ${study.sourceUrl && study.sourceUrl.includes('pubmed') ? 'View on PubMed' : 'View on ClinicalTrials.gov'}
                 </a>
             </p>
         </div>
