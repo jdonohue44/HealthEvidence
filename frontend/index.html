@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Health Evidence</title>
-    <meta name="description" content="Health research you can trust. We highlight what's proven and what's not in nutrition, exercise, and health.">
+    <meta name="description" content="Health research you can trust. We highlight what's proven and what's not in nutrition, exercise, and medicine.">
     <link rel="icon" type="image/svg+xml" href="img/logo.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -15,7 +15,7 @@
     <header class="masthead">
         <div class="masthead-content">
             <h1 class="site-title">Health Evidence</h1>
-            <p class="site-tagline">Distinguishing causal evidence from correlational claims in health</p>
+            <p class="site-tagline">Distinguishing robust evidence from click-bait headlines in health research</p>
         </div>
     </header>
 
@@ -39,8 +39,8 @@
                         </button>
                     </li>
                     <li>
-                        <button class="nav-tab" data-tab="health" role="tab" aria-selected="false">
-                            Health
+                        <button class="nav-tab" data-tab="medicine" role="tab" aria-selected="false">
+                            Medicine
                         </button>
                     </li>
                     <li>
@@ -91,32 +91,26 @@
             <div class="footer-about">
                 <h2>About</h2>
                 <p>
-                    Health Evidence cuts through the noise by highlighting research that's 
-                    actually reliable, and calling out popular claims that aren't.
-                </p>
-                <p>
-                    Our goal is simple: help you know what you can trust so you can make informed decisions about your health.
+                    Most people are not trained experts in assessing causal research.
+                    Our goal with this website is to help you know what you can trust so you can make informed decisions about your health.
                 </p>
             </div>
             <div class="footer-methodology">
                 <h2>How We Decide</h2>
                 <p>
-                    <strong>Strong Evidence</strong> comes from well-designed experiments 
-                    where people were randomly assigned to groups, with clear results 
-                    and enough participants to be reliable.
+                    <strong>Strong Evidence</strong> comes from randomized experiments with lots of participants and large effects.
                 </p>
                 <p>
-                    <strong>Weak Evidence</strong> often comes from studies that only 
-                    observed patterns without testing interventions, making it impossible to 
-                    know if one thing actually caused another.
+                    <strong>Weak Evidence</strong> comes from studies that only observed patterns without testing interventions, 
+                    or from studies that had small effects or few participants.
                 </p>
             </div>
             <div class="footer-sources">
                 <h2>Data Sources</h2>
                 <p>
                     Studies are sourced from 
-                    <a href="https://clinicaltrials.gov" target="_blank" rel="noopener">ClinicalTrials.gov</a> and 
-                    <a href="https://pubmed.ncbi.nlm.nih.gov/" target="_blank" rel="noopener">PubMed</a> 
+                    <!-- <a href="https://clinicaltrials.gov" target="_blank" rel="noopener">ClinicalTrials.gov</a> and  -->
+                    <a href="https://pubmed.ncbi.nlm.nih.gov/" target="_blank" rel="noopener">PubMed</a>, a database of more than 40 million citations for biomedical literature created by the National Library of Medicine.
                 </p>
             </div>
         </div>
@@ -136,7 +130,7 @@
         </div>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

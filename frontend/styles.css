@@ -24,6 +24,8 @@
     --color-highlight: #fff4b5;
     --color-meta: #7a5b00;
     --color-meta-bg: #fff3cc;
+    --color-observational: #7a1f1f;
+    --color-observational-bg: #fde8e8;
     
     /* Typography */
     --font-serif: 'Newsreader', Georgia, 'Times New Roman', serif;
@@ -60,6 +62,8 @@
         --color-highlight: #4f4300;
         --color-meta: #f5d98b;
         --color-meta-bg: #3a2f12;
+        --color-observational: #ffb3b3;
+        --color-observational-bg: #2d1818;
     }
 }
 
@@ -408,8 +412,21 @@ a:hover {
     background-color: var(--color-meta-bg);
 }
 
+.study-method-observational {
+    color: var(--color-observational);
+    background-color: var(--color-observational-bg);
+}
+
 /* Small gold medal icon used to highlight randomized trials */
 .rct-medal {
+    width: 20px;
+    height: 20px;
+    display: inline-block;
+    vertical-align: middle;
+    margin-right: 6px;
+}
+
+.observational-warning-icon {
     width: 20px;
     height: 20px;
     display: inline-block;
@@ -723,6 +740,11 @@ a:hover {
 .modal-method-meta {
     color: var(--color-meta);
     background-color: var(--color-meta-bg);
+}
+
+.modal-method-observational {
+    color: var(--color-observational);
+    background-color: var(--color-observational-bg);
 }
 
 .modal-summary {

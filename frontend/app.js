@@ -1,7 +1,6 @@
 
 // State
 let goldStandardStudies = [];
-let weakEvidenceStudies = [];
 let currentTab = 'latest';
 let searchQuery = '';
 
@@ -16,15 +15,33 @@ const modalBackdropEl = modalEl.querySelector('.modal-backdrop');
 const modalCloseEl = modalEl.querySelector('.modal-close');
 const searchInputEl = document.getElementById('search-input');
 
-const META_ANALYSIS_PATTERN = /meta[-\s]?analysis|systematic review/i;
-const RANDOMIZED_PATTERN = /randomi[sz]ed|randomized controlled trial|rct/i;
-
-function detectMetaAnalysis(text) {
-    return META_ANALYSIS_PATTERN.test(text || '');
+/**
+ * Badge and list-card styling for evidence tier (GOLD / SILVER / BRONZE / WEAK)
+ */
+function tierPresentation(study) {
+    if (study.evidenceTier === 'WEAK') {
+        return { tierClass: 'study-tier-weak', tierLabel: 'Weak Evidence', cardClass: ' study-article-weak' };
+    }
+    if (study.evidenceTier === 'GOLD') {
+        return { tierClass: 'study-tier-gold', tierLabel: 'Strong Evidence', cardClass: '' };
+    }
+    return { tierClass: 'study-tier-silver', tierLabel: 'Strong Evidence', cardClass: '' };
 }
 
-function detectRandomized(text) {
-    return RANDOMIZED_PATTERN.test(text || '');
+function sourceLinkLabel(url) {
+    if (!url) return 'View source';
+    if (url.includes('pubmed')) return 'View on PubMed';
+    if (url.includes('doi.org') || url.startsWith('https://doi.org')) return 'View article (DOI)';
+    if (url.includes('clinicaltrials.gov')) return 'View on ClinicalTrials.gov';
+    return 'View source';
+}
+
+function normalizeCategory(category) {
+    const normalized = String(category || '').toLowerCase();
+    if (normalized === 'health') {
+        return 'medicine';
+    }
+    return normalized;
 }
 
 /**
@@ -32,8 +49,8 @@ function detectRandomized(text) {
  * Returns object with verdict text and confidence level
  */
 function determineVerdict(study) {
-    // For weak evidence studies
-    if (study.type === 'weak' || study.evidenceTier === 'WEAK') {
+    // For weak-tier studies (single CSV source)
+    if (study.evidenceTier === 'WEAK') {
         return {
             verdict: 'Probably not',
             confidence: 'Evidence is weak or flawed',
@@ -96,14 +113,8 @@ function determineVerdict(study) {
  */
 async function init() {
     try {
-        // Load both data sources in parallel
-        const [goldData, weakData] = await Promise.all([
-            loadCSV('data/clinical_trials.csv'),
-            loadCSV('data/weak_evidence.csv')
-        ]);
-        
+        const goldData = await loadClinicalTrialsSheet('data/clinical_trials.xlsx');
         goldStandardStudies = processGoldStandardData(goldData);
-        weakEvidenceStudies = processWeakEvidenceData(weakData);
         
         // Set up event listeners
         setupTabNavigation();
@@ -120,77 +131,134 @@ async function init() {
 }
 
 /**
- * Load and parse a CSV file
+ * Parse p-value from spreadsheet cells (number or strings like "p=0.03", "p<0.001").
  */
-function loadCSV(path) {
-    return new Promise((resolve, reject) => {
-        Papa.parse(path, {
-            download: true,
-            header: true,
-            skipEmptyLines: true,
-            complete: (results) => {
-                if (results.errors.length > 0) {
-                    console.warn('CSV parse warnings:', results.errors);
-                }
-                resolve(results.data);
-            },
-            error: (error) => {
-                reject(error);
-            }
-        });
-    });
+function parsePValueCell(val) {
+    if (val === null || val === undefined || val === '') {
+        return { numeric: null, display: '' };
+    }
+    if (typeof val === 'number' && Number.isFinite(val)) {
+        return { numeric: val, display: `p=${val}` };
+    }
+    const s = String(val).trim();
+    const lt = s.match(/p\s*[<≤]\s*([\d.eE+-]+)/i);
+    if (lt) {
+        const bound = parseFloat(lt[1]);
+        const numeric = bound != null && !isNaN(bound) ? bound * 0.5 : null;
+        return { numeric, display: s };
+    }
+    const eq = s.match(/p\s*=\s*([\d.eE+-]+)/i);
+    if (eq) {
+        const n = parseFloat(eq[1]);
+        return { numeric: !isNaN(n) ? n : null, display: s };
+    }
+    const plain = parseFloat(s.replace(/,/g, ''));
+    if (!isNaN(plain)) {
+        return { numeric: plain, display: s };
+    }
+    return { numeric: null, display: s };
+}
+
+function parseNumericCell(val) {
+    if (val === null || val === undefined || val === '') return null;
+    if (typeof val === 'number' && Number.isFinite(val)) return val;
+    const n = parseFloat(String(val).replace(/,/g, ''));
+    return !isNaN(n) ? n : null;
+}
+
+function parseIntCell(val) {
+    const n = parseNumericCell(val);
+    return n != null ? Math.round(n) : 0;
 }
 
 /**
- * Process gold standard trial data: one study per nct_id, with all outcomes aggregated
+ * Load first worksheet from an .xlsx file as an array of row objects (header row = keys).
+ */
+async function loadClinicalTrialsSheet(path) {
+    const res = await fetch(path);
+    if (!res.ok) {
+        throw new Error(`Failed to fetch ${path}: ${res.status}`);
+    }
+    const buf = await res.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array' });
+    const sheetName = wb.SheetNames[0];
+    if (!sheetName) {
+        return [];
+    }
+    const ws = wb.Sheets[sheetName];
+    return XLSX.utils.sheet_to_json(ws, { defval: '', raw: true });
+}
+
+/**
+ * Process gold standard trial data: one study per study_id, with rows aggregated as outcomes.
+ * Supports the current xlsx schema (study_type, n, difference, string p_value) and legacy CSV columns.
  */
 function processGoldStandardData(data) {
     const rows = data.filter(row => (row.study_id || row.nct_id) && row.headline);
     const byStudy = {};
-    const tierRank = { GOLD: 3, SILVER: 2, BRONZE: 1 };
+    const tierRank = { GOLD: 3, SILVER: 2, BRONZE: 1, WEAK: 0 };
     rows.forEach(row => {
-        const studyId = row.study_id || row.nct_id;
-        const metaSource = `${row.title || ''} ${row.headline || ''} ${row.summary || ''}`;
-        const isMetaAnalysis = detectMetaAnalysis(metaSource);
-        const isRandomized = !isMetaAnalysis;
+        const studyId = String(row.study_id || row.nct_id).trim();
+        const studyType = String(row.study_type || '').trim().toLowerCase();
+        const isMetaAnalysis = studyType === 'meta-analysis' || studyType === 'meta_analysis';
+        const isRandomized = !isMetaAnalysis && (studyType === 'rct' || studyType === 'randomized');
+        const isObservational = !isMetaAnalysis && !isRandomized && studyType === 'observational';
+
+        const pv = parsePValueCell(row.p_value);
+        const rowSample = parseIntCell(row.n ?? row.sample_size ?? row.study_enrollment);
+
+        const diffRaw = row.difference;
+        const difference = diffRaw !== undefined && diffRaw !== '' && diffRaw !== null ? diffRaw : null;
+
         const outcome = {
             headline: row.headline || '',
             summary: row.summary || '',
             outcomeName: row.outcome_name || '',
             outcomeType: row.outcome_type || '',
-            controlMean: parseFloat(row.control_mean) || null,
-            treatmentMean: parseFloat(row.treatment_mean) || null,
-            effectSize: parseFloat(row.effect_size) || null,
+            controlMean: parseNumericCell(row.control_mean),
+            treatmentMean: parseNumericCell(row.treatment_mean),
+            effectSize: parseNumericCell(row.effect_size),
             effectMagnitude: row.effect_magnitude || '',
-            pValue: parseFloat(row.p_value) || null,
-            ultraScore: parseFloat(row.ultra_score) || 0,
+            pValue: pv.numeric,
+            pValueDisplay: pv.display,
+            ultraScore: parseNumericCell(row.ultra_score) || 0,
             analysisParamType: row.analysis_param_type || '',
-            analysisParamValue: row.analysis_param_value || ''
+            analysisParamValue: row.analysis_param_value || '',
+            difference
         };
         if (!byStudy[studyId]) {
+            const enroll = parseIntCell(row.study_enrollment || row.sample_size || row.n);
             byStudy[studyId] = {
                 id: studyId,
                 type: 'gold',
-                category: (row.category || 'health').toLowerCase(),
+                category: normalizeCategory(row.category || 'medicine'),
                 evidenceTier: row.evidence_tier || 'GOLD',
                 title: row.title || '',
+                studyType,
                 intervention: row.intervention || '',
                 interventionDescription: row.intervention_description || '',
                 comparator: row.comparator || '',
                 population: row.population || '',
                 conditions: row.conditions || '',
-                sampleSize: parseInt(row.sample_size) || 0,
-                studyEnrollment: parseInt(row.study_enrollment) || parseInt(row.sample_size) || 0,
+                sampleSize: rowSample || enroll,
+                studyEnrollment: enroll || rowSample,
                 sampleSizeCategory: row.sample_size_category || '',
-                numArms: parseInt(row.num_arms) || 2,
+                numArms: (() => {
+                    const raw = row.num_arms;
+                    const n = parseInt(raw, 10);
+                    if (Number.isFinite(n) && n > 0) return n;
+                    return 0;
+                })(),
                 datePublished: row.date_published || row.completion_date || '',
                 sourceUrl: row.source_url || (studyId.startsWith('NCT') ? `https://clinicaltrials.gov/study/${studyId}` : ''),
                 isRandomized,
                 isMetaAnalysis,
+                isObservational,
                 outcomes: []
             };
         }
-        byStudy[studyId].sampleSize = Math.max(byStudy[studyId].sampleSize, parseInt(row.sample_size) || 0);
+        byStudy[studyId].sampleSize = Math.max(byStudy[studyId].sampleSize, rowSample);
+        byStudy[studyId].studyEnrollment = Math.max(byStudy[studyId].studyEnrollment || 0, parseIntCell(row.study_enrollment || row.sample_size || row.n));
         byStudy[studyId].outcomes.push(outcome);
         const r = tierRank[row.evidence_tier] || 0;
         if (r > (tierRank[byStudy[studyId].evidenceTier] || 0)) byStudy[studyId].evidenceTier = row.evidence_tier;
@@ -207,42 +275,18 @@ function processGoldStandardData(data) {
         study.effectSize = primary.effectSize;
         study.effectMagnitude = primary.effectMagnitude;
         study.pValue = primary.pValue;
+        study.pValueDisplay = primary.pValueDisplay || '';
         study.ultraScore = primary.ultraScore;
+        study.difference = primary.difference;
         if (study.sampleSize === 0) study.sampleSize = study.studyEnrollment;
         return study;
-    }).sort((a, b) => b.ultraScore - a.ultraScore);
-}
-
-/**
- * Process weak evidence data
- */
-function processWeakEvidenceData(data) {
-    return data
-        .filter(row => row.claim || row.headline)
-        .map(row => {
-            const metaSource = `${row.study_type || ''} ${row.headline || ''} ${row.summary || ''}`;
-            const isMetaAnalysis = detectMetaAnalysis(metaSource);
-            const isRandomized = !isMetaAnalysis && detectRandomized(metaSource);
-
-            return ({
-            id: row.study_id || `weak-${Math.random().toString(36).substr(2, 9)}`,
-            type: 'weak',
-            category: (row.category || 'health').toLowerCase(),
-            evidenceTier: 'WEAK',
-            headline: row.headline || row.claim || '',
-            claim: row.claim || '',
-            actualFinding: row.actual_finding || '',
-            summary: row.summary || '',
-            studyType: row.study_type || 'Observational',
-            sampleSize: parseInt(row.sample_size) || 0,
-            whyWeak: row.why_weak || '',
-            confounders: row.confounders || '',
-            sourceUrl: row.source_url || '',
-                datePublished: row.date_published || '',
-                isRandomized,
-                isMetaAnalysis
-            });
-        });
+    }).sort((a, b) => {
+        const tb = tierRank[b.evidenceTier] || 0;
+        const ta = tierRank[a.evidenceTier] || 0;
+        if (tb !== ta) return tb - ta;
+        if (b.ultraScore !== a.ultraScore) return b.ultraScore - a.ultraScore;
+        return b.sampleSize - a.sampleSize;
+    });
 }
 
 /**
@@ -335,11 +379,8 @@ function matchesSearch(study, query) {
         study.population,
         study.outcomeName,
         study.category,
-        // For weak evidence
-        study.claim,
-        study.actualFinding,
-        study.whyWeak,
-        study.confounders
+        study.studyType,
+        study.difference != null && study.difference !== '' ? String(study.difference) : ''
     ];
     
     // Check if any field contains the search query
@@ -356,18 +397,15 @@ function getFilteredStudies() {
     
     // First filter by tab
     if (currentTab === 'weak') {
-        studies = weakEvidenceStudies;
+        studies = goldStandardStudies.filter(s => s.evidenceTier === 'WEAK');
     } else if (currentTab === 'latest') {
         studies = goldStandardStudies.slice(0, 20);
     } else {
-        studies = goldStandardStudies.filter(s => s.category === currentTab);
+        studies = goldStandardStudies.filter(s => s.category === normalizeCategory(currentTab));
     }
     
-    // If there's a search query, search across ALL studies (both gold and weak)
     if (searchQuery) {
-        // Combine all studies and filter by search
-        const allStudies = [...goldStandardStudies, ...weakEvidenceStudies];
-        studies = allStudies.filter(s => matchesSearch(s, searchQuery));
+        studies = goldStandardStudies.filter(s => matchesSearch(s, searchQuery));
     }
     
     return studies;
@@ -403,26 +441,21 @@ function renderStudies() {
     // Build search results header if searching
     let headerHtml = '';
     if (searchQuery) {
-        const goldCount = studies.filter(s => s.type === 'gold').length;
-        const weakCount = studies.filter(s => s.type === 'weak').length;
+        const strongCount = studies.filter(s => s.evidenceTier && s.evidenceTier !== 'WEAK').length;
+        const weakCount = studies.filter(s => s.evidenceTier === 'WEAK').length;
         
         headerHtml = `
             <div class="search-results-header">
                 <p class="search-results-summary">
                     Found ${studies.length} ${studies.length === 1 ? 'result' : 'results'} for "<strong>${escapeHtml(searchQuery)}</strong>"
-                    ${goldCount > 0 ? `<span class="search-count-gold">${goldCount} gold standard</span>` : ''}
-                    ${weakCount > 0 ? `<span class="search-count-weak">${weakCount} popular but weak</span>` : ''}
+                    ${strongCount > 0 ? `<span class="search-count-gold">${strongCount} strong-tier</span>` : ''}
+                    ${weakCount > 0 ? `<span class="search-count-weak">${weakCount} weak evidence</span>` : ''}
                 </p>
             </div>
         `;
     }
     
-    const html = headerHtml + studies.map(study => {
-        if (study.type === 'weak') {
-            return renderWeakStudyArticle(study);
-        }
-        return renderGoldStudyArticle(study);
-    }).join('');
+    const html = headerHtml + studies.map(study => renderGoldStudyArticle(study)).join('');
     
     studiesListEl.innerHTML = html;
     
@@ -430,8 +463,7 @@ function renderStudies() {
     studiesListEl.querySelectorAll('.study-article').forEach(article => {
         article.addEventListener('click', () => {
             const studyId = article.dataset.studyId;
-            const studyType = article.dataset.studyType;
-            openStudyModal(studyId, studyType);
+            openStudyModal(studyId);
         });
         
         // Keyboard accessibility
@@ -439,8 +471,7 @@ function renderStudies() {
             if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
                 const studyId = article.dataset.studyId;
-                const studyType = article.dataset.studyType;
-                openStudyModal(studyId, studyType);
+                openStudyModal(studyId);
             }
         });
     });
@@ -561,7 +592,7 @@ function generateSimpleHeadline(study) {
 }
 
 /**
- * Render method tags (RCT, meta-analysis)
+ * Render method tags (RCT, meta-analysis, observational) from `study_type` in data.
  */
 function renderMethodTags(study, classPrefix = 'study') {
     const tags = [];
@@ -581,6 +612,13 @@ function renderMethodTags(study, classPrefix = 'study') {
         });
     }
 
+    if (study.isObservational) {
+        tags.push({
+            label: `<img src="img/observational_warning.svg" alt="" width="20" height="20" class="observational-warning-icon" role="presentation" /><span class="${classPrefix}-method-label">Observational study</span>`,
+            className: `${classPrefix}-method ${classPrefix}-method-observational`
+        });
+    }
+
     if (tags.length === 0) {
         return '';
     }
@@ -592,16 +630,21 @@ function renderMethodTags(study, classPrefix = 'study') {
  * Render a gold standard study article
  */
 function renderGoldStudyArticle(study) {
-    const tierClass = study.evidenceTier === 'GOLD' ? 'study-tier-gold' : 'study-tier-silver';
-    const tierLabel = 'Strong Evidence';
+    const pres = tierPresentation(study);
+    const tierClass = pres.tierClass;
+    const tierLabel = pres.tierLabel;
     
     const meta = [];
     if (study.sampleSize > 0) {
-        meta.push(`${study.sampleSize.toLocaleString()} people tested`);
+        meta.push(study.evidenceTier === 'WEAK'
+            ? `${study.sampleSize.toLocaleString()} participants`
+            : `${study.sampleSize.toLocaleString()} people tested`);
     }
     // Add p-value to footer
     if (study.pValue !== null && study.pValue !== undefined && !isNaN(study.pValue)) {
         meta.push(`p ${formatPValue(study.pValue)}`);
+    } else if (study.pValueDisplay) {
+        meta.push(study.pValueDisplay);
     }
     // Add effect size to footer
     if (study.effectSize !== null && study.effectSize !== undefined && !isNaN(study.effectSize)) {
@@ -629,7 +672,7 @@ function renderGoldStudyArticle(study) {
     ` : '';
 
     return `
-        <article class="study-article" data-study-id="${escapeHtml(study.id)}" data-study-type="gold" tabindex="0" role="button">
+        <article class="study-article${pres.cardClass}" data-study-id="${escapeHtml(study.id)}" data-study-type="gold" tabindex="0" role="button">
             <header class="study-header">
                 <span class="study-category">${escapeHtml(study.category)}</span>
                 <div class="study-badges">
@@ -654,56 +697,12 @@ function renderGoldStudyArticle(study) {
 }
 
 /**
- * Render a weak evidence study article
- */
-function renderWeakStudyArticle(study) {
-    const methodTags = renderMethodTags(study);
-    const verdict = determineVerdict(study);
-    // Convert headline to question format if not already a question
-    const questionHeadline = convertToQuestion(study.headline);
-    return `
-        <article class="study-article study-article-weak" data-study-id="${escapeHtml(study.id)}" data-study-type="weak" tabindex="0" role="button">
-            <header class="study-header">
-                <span class="study-category">${escapeHtml(study.category)}</span>
-                <div class="study-badges">
-                    <span class="study-tier study-tier-weak">Weak Evidence</span>
-                    ${methodTags}
-                </div>
-            </header>
-            <h2 class="study-headline">${highlightText(questionHeadline, searchQuery)}</h2>
-            <div class="study-verdict ${verdict.className}">
-                <span class="verdict-label">${verdict.verdict}</span>
-                <span class="verdict-confidence">${verdict.confidence}</span>
-            </div>
-            <p class="study-summary">${highlightText(truncateSummary(study.summary), searchQuery)}</p>
-            <footer class="study-meta">
-                ${study.studyType ? escapeHtml(study.studyType) : ''}
-                ${study.sampleSize > 0 ? `<span class="study-meta-divider">·</span>${study.sampleSize.toLocaleString()} people observed` : ''}
-                ${study.datePublished ? `<span class="study-meta-divider">·</span>${escapeHtml(study.datePublished)}` : ''}
-            </footer>
-        </article>
-    `;
-}
-
-/**
  * Open the study detail modal
  */
-function openStudyModal(studyId, studyType) {
-    let study;
-    
-    if (studyType === 'weak') {
-        study = weakEvidenceStudies.find(s => s.id === studyId);
-        if (study) {
-            modalBodyEl.innerHTML = renderWeakStudyModal(study);
-        }
-    } else {
-        study = goldStandardStudies.find(s => s.id === studyId);
-        if (study) {
-            modalBodyEl.innerHTML = renderGoldStudyModal(study);
-        }
-    }
-    
+function openStudyModal(studyId) {
+    const study = goldStandardStudies.find(s => s.id === studyId);
     if (study) {
+        modalBodyEl.innerHTML = renderGoldStudyModal(study);
         modalEl.style.display = 'flex';
         document.body.style.overflow = 'hidden';
         modalCloseEl.focus();
@@ -722,18 +721,24 @@ function closeModal() {
  * Render gold standard study modal content (one trial, all outcomes in same style)
  */
 function renderGoldStudyModal(study) {
-    const tierClass = study.evidenceTier === 'GOLD' ? 'study-tier-gold' : 'study-tier-silver';
-    const tierLabel = 'Strong Evidence';
+    const pres = tierPresentation(study);
+    const tierClass = pres.tierClass;
+    const tierLabel = pres.tierLabel;
     const simpleHeadline = generateSimpleHeadline(study);
     const methodTags = renderMethodTags(study, 'modal');
-    const outcomes = study.outcomes && study.outcomes.length ? study.outcomes : [{ headline: study.headline, summary: study.summary, outcomeName: study.outcomeName, outcomeType: study.outcomeType, controlMean: study.controlMean, treatmentMean: study.treatmentMean, effectSize: study.effectSize, effectMagnitude: study.effectMagnitude, pValue: study.pValue, analysisParamType: study.analysisParamType, analysisParamValue: study.analysisParamValue }];
+    const outcomes = study.outcomes && study.outcomes.length ? study.outcomes : [{ headline: study.headline, summary: study.summary, outcomeName: study.outcomeName, outcomeType: study.outcomeType, controlMean: study.controlMean, treatmentMean: study.treatmentMean, effectSize: study.effectSize, effectMagnitude: study.effectMagnitude, pValue: study.pValue, pValueDisplay: study.pValueDisplay, analysisParamType: study.analysisParamType, analysisParamValue: study.analysisParamValue, difference: study.difference }];
 
     function formatOutcomeStats(o) {
         const parts = [];
         if (o.pValue != null && !isNaN(o.pValue)) parts.push(`p ${o.pValue < 0.001 ? '<0.001' : o.pValue.toFixed(3)}`);
+        else if (o.pValueDisplay) parts.push(o.pValueDisplay);
         if (o.analysisParamType && o.analysisParamValue) parts.push(`${o.analysisParamType}: ${o.analysisParamValue}`);
         if (o.effectMagnitude) parts.push(o.effectMagnitude + ' effect');
         if (o.effectSize != null && !isNaN(o.effectSize)) parts.push(`d = ${o.effectSize.toFixed(2)}`);
+        if (o.difference != null && o.difference !== '') {
+            const d = typeof o.difference === 'number' ? String(o.difference) : String(o.difference).trim();
+            if (d) parts.push(`Δ ${d}`);
+        }
         return parts.length ? parts.join(' · ') : '';
     }
 
@@ -763,10 +768,10 @@ function renderGoldStudyModal(study) {
         <div class="modal-stats">
             <div class="modal-stat">
                 <div class="modal-stat-value">${study.sampleSize > 0 ? study.sampleSize.toLocaleString() : 'N/A'}</div>
-                <div class="modal-stat-label">People tested</div>
+                <div class="modal-stat-label">${study.evidenceTier === 'WEAK' ? 'Participants (approx.)' : 'People tested'}</div>
             </div>
             <div class="modal-stat">
-                <div class="modal-stat-value">${study.numArms || 2}</div>
+                <div class="modal-stat-value">${study.numArms > 0 ? study.numArms : '—'}</div>
                 <div class="modal-stat-label">Groups compared</div>
             </div>
         </div>
@@ -785,6 +790,13 @@ function renderGoldStudyModal(study) {
         </div>
         ` : ''}
         
+        ${!study.intervention && study.interventionDescription ? `
+        <div class="modal-section">
+            <h2 class="modal-section-title">Claim or topic</h2>
+            <p class="modal-section-content">${highlightText(study.interventionDescription, searchQuery)}</p>
+        </div>
+        ` : ''}
+        
         <div class="modal-section">
             <h2 class="modal-section-title">${outcomes.length > 1 ? 'Findings' : 'Finding'}</h2>
             <div class="modal-outcomes">${outcomesHtml}</div>
@@ -794,67 +806,10 @@ function renderGoldStudyModal(study) {
             <h2 class="modal-section-title">Source</h2>
             <p class="modal-section-content">
                 <a href="${escapeHtml(study.sourceUrl)}" target="_blank" rel="noopener">
-                    ${study.sourceUrl && study.sourceUrl.includes('pubmed') ? 'View on PubMed' : 'View on ClinicalTrials.gov'}
+                    ${sourceLinkLabel(study.sourceUrl)}
                 </a>
             </p>
         </div>
-    `;
-}
-
-/**
- * Render weak evidence study modal content
- */
-function renderWeakStudyModal(study) {
-    const methodTags = renderMethodTags(study, 'modal');
-    return `
-        <header class="modal-header">
-            <p class="modal-category">${escapeHtml(study.category)}</p>
-            <h1 class="modal-title" id="modal-title">${highlightText(study.headline, searchQuery)}</h1>
-            <div class="modal-badges">
-                <span class="modal-tier study-tier-weak">Weak Evidence</span>
-                ${methodTags}
-            </div>
-        </header>
-        
-        <div class="modal-summary">
-            <p>${highlightText(study.summary, searchQuery)}</p>
-        </div>
-        
-        <div class="modal-stats">
-            <div class="modal-stat">
-                <div class="modal-stat-value">${study.sampleSize > 0 ? study.sampleSize.toLocaleString() : 'Varies'}</div>
-                <div class="modal-stat-label">People observed</div>
-            </div>
-            <div class="modal-stat">
-                <div class="modal-stat-value">${escapeHtml(study.studyType)}</div>
-                <div class="modal-stat-label">Type of study</div>
-            </div>
-        </div>
-        
-        ${study.whyWeak ? `
-        <div class="modal-section">
-            <h2 class="modal-section-title">Why we can't trust this</h2>
-            <p class="modal-section-content">${highlightText(study.whyWeak, searchQuery)}</p>
-        </div>
-        ` : ''}
-        
-        ${study.confounders ? `
-        <div class="modal-section">
-            <h2 class="modal-section-title">Other possible explanations</h2>
-            <p class="modal-section-content">${highlightText(study.confounders, searchQuery)}</p>
-        </div>
-        ` : ''}
-        
-        ${study.sourceUrl ? `
-        <div class="modal-source modal-section">
-            <h2 class="modal-section-title">Source</h2>
-            <p class="modal-section-content">
-                <a href="${escapeHtml(study.sourceUrl)}" target="_blank" rel="noopener">
-                    View original study
-                </a>
-            </p>
-        </div>
-        ` : ''}
     `;
 }
 
